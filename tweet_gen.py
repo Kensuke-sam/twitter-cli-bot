@@ -44,20 +44,29 @@ def get_post_data(slug):
         "url": f"{BASE_URL}/posts/{slug}"
     }
 
-def generate_tweets_with_gemini_cli(post_data):
+def generate_tweets_with_cli(post_data, ai_cli="gemini"):
     prompt = PROMPT_TEMPLATE.format(url=post_data["url"], title=post_data["title"])
     
-    print("Generating tweets using Gemini CLI...")
-    # gemini コマンドを呼び出す
+    print(f"Generating tweets using {ai_cli} CLI...")
+    
     try:
-        # gemini コマンドにプロンプトを渡して実行
-        result = subprocess.run(["gemini", prompt], capture_output=True, text=True, check=True)
+        if ai_cli == "gemini":
+            cmd = ["gemini", prompt]
+        elif ai_cli == "codex":
+            cmd = ["codex", prompt]
+        elif ai_cli == "claude":
+            # Claude Code CLI
+            cmd = ["claude", prompt]
+        else:
+            cmd = ["gemini", prompt]
+
+        result = subprocess.run(cmd, capture_output=True, text=True, check=True)
         content = result.stdout
     except subprocess.CalledProcessError as e:
-        print(f"Error calling gemini cli: {e}")
+        print(f"Error calling {ai_cli} cli: {e}\nOutput: {e.output}")
         sys.exit(1)
     except FileNotFoundError:
-        print("Error: 'gemini' command not found. Please make sure Gemini CLI is installed and in your PATH.")
+        print(f"Error: '{ai_cli}' command not found. Please make sure the {ai_cli} CLI is installed and in your PATH.")
         sys.exit(1)
     
     # ツイートを分割（空行や番号を除去）
@@ -78,9 +87,10 @@ def post_to_twitter(tweet_text):
         print(f"Failed to post: {e}")
 
 def main():
-    parser = argparse.ArgumentParser(description="Generate and post tweets using Gemini CLI.")
+    parser = argparse.ArgumentParser(description="Generate and post tweets using AI CLIs.")
     parser.add_argument("input", nargs="?", help="URL or slug of the article")
     parser.add_argument("--auto", action="store_true", help="Automatically pick and post a tweet")
+    parser.add_argument("--ai", choices=["gemini", "codex", "claude"], default="gemini", help="Choose AI CLI backend (gemini, codex, claude)")
     args = parser.parse_args()
     
     # 記事データの読み込み
@@ -99,7 +109,7 @@ def main():
         slug = args.input.split("/")[-1]
     
     post_data = get_post_data(slug)
-    tweets = generate_tweets_with_gemini_cli(post_data)
+    tweets = generate_tweets_with_cli(post_data, ai_cli=args.ai)
     
     if not tweets:
         print("Error: No tweets generated.")
