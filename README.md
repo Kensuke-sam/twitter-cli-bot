@@ -1,51 +1,54 @@
-# koteihi-twitter-bot 🐦
+# AI Twitter Bot (CLI-based) 🤖🐦
 
-「固定費ゼロ研究所」の記事から X (Twitter) 投稿を自動生成・投稿する AI 自動運用スクリプトです。
-API キーを直接管理せず、ローカルにインストールされた AI CLI (Gemini, Codex, Claude Code) を使用します。
+A highly efficient tool to generate and post tweets from your articles using local AI CLIs (Gemini, Codex, or Claude Code). No API keys needed for generation if you already have the CLIs configured.
 
-## 🚀 使い方
+## ✨ Features
+- **Multi-AI Support**: Use `gemini`, `codex`, or `claude` CLI as your backend.
+- **Article Integration**: Automatically extracts titles and slugs from your project files (e.g., Next.js posts list).
+- **Interactive & Auto Modes**: Choose from 5 generated drafts or let the bot pick one randomly.
+- **Zero-Config Generation**: Leverages your existing CLI authentication.
 
-### 1. 手動モード（ツイートを選んで投稿）
-記事の URL またはスラッグを指定して実行します。5つの案が生成されるので、番号で選んで投稿します。
+## 🚀 Getting Started
 
+### 1. Installation
+Ensure you have the following installed:
+- [uv](https://github.com/astral-sh/uv) (Python package manager)
+- [twitter-cli](https://github.com/jackwener/twitter-cli)
+- One of the AI CLIs: `gemini`, `codex`, or `claude`
+
+### 2. Configuration
+Copy the sample config and fill in your details:
 ```bash
-# Gemini CLI を使用（デフォルト）
-./tweet.sh daigakusei-credit-card-3sen
-
-# Codex CLI を使用
-./tweet.sh daigakusei-credit-card-3sen --ai codex
-
-# Claude Code CLI を使用
-./tweet.sh daigakusei-credit-card-3sen --ai claude
+cp config.json.sample config.json
 ```
 
-### 2. 自動モード（ランダムに1つ選んで投稿）
-`--auto` フラグを付けると、生成された案からランダムに1つ選んで即座に投稿します。
+Edit `config.json`:
+- `posts_file_path`: Path to your articles file (supports `.ts`, `.js`, `.json`).
+- `base_url`: Your website's root URL.
+- `twitter_cli_path`: Path to where `twitter-cli` is located.
+- `twitter_auth_token` / `twitter_ct0`: (Optional) Your X session tokens.
 
+### 3. Usage
+
+#### Interactive Mode
+Select an article and pick a tweet from 5 drafts.
 ```bash
-./tweet.sh --auto
+./tweet.sh your-article-slug --ai gemini
 ```
 
-※ 記事を指定しない場合は、`posts.ts` からランダムに記事が選ばれます。
+#### Automatic Mode (Perfect for Cron)
+Pick a random article and a random tweet draft, then post immediately.
+```bash
+./tweet.sh --auto --ai claude
+```
 
-## 📅 定期実行 (cron) の設定
-
-1日3回（9時, 12時, 18時）、ランダムな記事を自動投稿する設定例です。
-
+## 📅 Scheduled Posting (Cron)
+Example: Post 3 times a day (9 AM, 12 PM, 6 PM) with a random article.
 ```cron
-0 9,12,18 * * * cd ~/koteihi-twitter-bot && ./tweet.sh --auto >> tweet.log 2>&1
+0 9,12,18 * * * cd ~/twitter-cli-bot && ./tweet.sh --auto >> bot.log 2>&1
 ```
 
-## 🛠 準備・要件
-
-1. **AI CLI のインストール**:
-   - `gemini`, `codex`, `claude` いずれかのコマンドがターミナルで叩ける状態であること。
-2. **Twitter CLI のセットアップ**:
-   - `twitter-cli` がインストールされており、ブラウザ等で `x.com` にログイン済みであること。
-3. **uv のインストール**:
-   - Python 依存関係の解決に `uv` を使用します。
-
-## 📂 ディレクトリ構造
-- `tweet_gen.py`: ツイート生成・投稿のメインロジック。
-- `tweet.sh`: 実行用ラッパースクリプト。
-- `../koteihi-zero/src/lib/posts.ts`: 記事データの参照先。
+## 📂 Project Structure
+- `tweet_gen.py`: Core logic for extraction and generation.
+- `tweet.sh`: Runner script.
+- `config.json`: Your private configuration (ignored by git).
