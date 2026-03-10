@@ -1,9 +1,13 @@
 {
-  "site_name": "Your Site Name",
-  "base_url": "https://your-domain.com",
-  "posts_file_path": "/path/to/your/posts.ts",
   "twitter_cli_path": "/path/to/twitter-cli",
+
+  "_comment": "以下はgenerateサブコマンドでpostsファイルから記事を取得する場合のみ必要",
+  "site_name": "",
+  "base_url": "",
+  "posts_file_path": "",
   "prompt_template": "あなたはSNSマーケターです。「{site_name}」の公式X投稿（140文字以内、フックあり、断定的、具体例あり、最後に記事リンク）を5つ作ってください。出力はツイート内容のみを1行ずつ出力してください。\n\n記事URL: {url}\n記事タイトル: {title}",
+
+  "_comment2": "以下は任意。省略するとtwitter-cliがブラウザCookieを自動取得",
   "twitter_auth_token": "",
   "twitter_ct0": ""
 }

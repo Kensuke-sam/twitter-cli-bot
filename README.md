@@ -47,13 +47,13 @@ Edit `config.json`:
 | Key | Required for | Description |
 |-----|-------------|-------------|
 | `twitter_cli_path` | All commands | Path to a local clone of twitter-cli |
-| `site_name` | `generate` only | Your site name, used in the prompt |
-| `base_url` | `generate` only | Your site's root URL (e.g. `https://your-domain.com`) |
-| `posts_file_path` | `generate` only | Path to your articles data file (`.ts`, `.js`, `.json`) |
-| `prompt_template` | `generate` only | AI prompt template for tweet generation |
+| `site_name` | `generate` (posts file mode) | Your site name, used in the prompt |
+| `base_url` | `generate` (posts file mode) | Your site's root URL (e.g. `https://your-domain.com`) |
+| `posts_file_path` | `generate` (posts file mode) | Path to your articles data file (`.ts`, `.js`, `.json`) |
+| `prompt_template` | Optional | Custom AI prompt. Defaults to a generic URL-based prompt |
 | `twitter_auth_token` / `twitter_ct0` | Optional | twitter-cli can auto-extract from browser cookies |
 
-> If you only want to use read/write operations (`feed`, `search`, `like`, etc.), only `twitter_cli_path` is required. The site-related keys are only needed for the `generate` subcommand.
+> **Minimum config:** only `twitter_cli_path` is required. The `generate` command accepts a URL directly, so site-related keys are only needed if you want to pull articles from a local posts file.
 
 ### 2. Authenticate twitter-cli
 
@@ -68,7 +68,13 @@ See [twitter-cli docs](https://github.com/jackwener/twitter-cli) for authenticat
 
 ### AI Tweet Generation
 
-Generate 5 drafts from an article and choose one to post:
+Pass a URL directly — no site configuration needed:
+
+```bash
+./tweet.sh generate https://example.com/some-article --ai gemini
+```
+
+Or use an article slug (requires `posts_file_path` in config):
 
 ```bash
 ./tweet.sh generate your-article-slug --ai gemini
@@ -77,10 +83,10 @@ Generate 5 drafts from an article and choose one to post:
 Auto-pick and post immediately (for cron):
 
 ```bash
-./tweet.sh generate --auto --ai claude
+./tweet.sh generate https://example.com/some-article --auto --ai claude
 ```
 
-Pick a random article if no slug is given:
+Pick a random article from your posts file if no input is given:
 
 ```bash
 ./tweet.sh generate --auto

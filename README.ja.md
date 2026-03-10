@@ -42,16 +42,16 @@ cp config.json.sample config.json
 }
 ```
 
-| キー | 必要なコマンド | 説明 |
-|------|-------------|------|
+| キー | 必要な場面 | 説明 |
+|------|-----------|------|
 | `twitter_cli_path` | 全コマンド | ローカルにクローンした twitter-cli のパス |
-| `site_name` | `generate` のみ | サイト名（プロンプト内で使用） |
-| `base_url` | `generate` のみ | サイトのルートURL（例: `https://your-domain.com`） |
-| `posts_file_path` | `generate` のみ | 記事データファイルのパス（`.ts` / `.js` / `.json`） |
-| `prompt_template` | `generate` のみ | ツイート生成用AIプロンプトのテンプレート |
+| `site_name` | `generate`（postsファイルモード） | サイト名（プロンプト内で使用） |
+| `base_url` | `generate`（postsファイルモード） | サイトのルートURL（例: `https://your-domain.com`） |
+| `posts_file_path` | `generate`（postsファイルモード） | 記事データファイルのパス（`.ts` / `.js` / `.json`） |
+| `prompt_template` | 任意 | カスタムプロンプト。省略時はURLベースのデフォルトを使用 |
 | `twitter_auth_token` / `twitter_ct0` | 任意 | 省略するとtwitter-cliがブラウザCookieを自動取得 |
 
-> `feed` / `search` / `like` などの読み取り・書き込み操作だけ使う場合は、`twitter_cli_path` のみ設定すれば動きます。サイト関連のキーは `generate` サブコマンドを使うときだけ必要です。
+> **最小構成:** `twitter_cli_path` だけあれば動きます。`generate` はURLを直接渡せるので、postsファイルから記事を引きたい場合以外はサイト関連の設定は不要です。
 
 ### 2. twitter-cli の認証
 
@@ -66,7 +66,13 @@ uv run twitter whoami
 
 ### AI ツイート生成
 
-指定した記事slugからツイート案を5つ生成して対話的に選択：
+URLを直接渡すだけで使えます（サイト設定不要）：
+
+```bash
+./tweet.sh generate https://example.com/some-article --ai gemini
+```
+
+postsファイルがある場合はslugでも指定できます（`posts_file_path` の設定が必要）：
 
 ```bash
 ./tweet.sh generate your-article-slug --ai gemini
@@ -75,10 +81,10 @@ uv run twitter whoami
 自動でランダム選択して即投稿（cron向け）：
 
 ```bash
-./tweet.sh generate --auto --ai claude
+./tweet.sh generate https://example.com/some-article --auto --ai claude
 ```
 
-slugを省略するとランダムに記事を選択：
+slugを省略するとpostsファイルからランダムに記事を選択：
 
 ```bash
 ./tweet.sh generate --auto

@@ -57,11 +57,41 @@ def get_post_data(slug, config):
     }
 
 
+def resolve_post_data(args, config):
+    """URL・slug・ランダムのいずれかでpost_dataを解決する"""
+    inp = args.input
+
+    # URLを直接渡した場合（postsファイル不要）
+    if inp and inp.startswith(("http://", "https://")):
+        return {"url": inp, "title": ""}
+
+    # slug or ランダム（postsファイルが必要）
+    if not config.get("posts_file_path"):
+        print("Error: URL を直接指定するか、config.json に posts_file_path を設定してください。")
+        sys.exit(1)
+
+    posts_file = Path(config["posts_file_path"])
+    content = posts_file.read_text(encoding="utf-8")
+    slugs = re.findall(r'slug:\s*"(.*?)"', content)
+
+    if not inp:
+        slug = random.choice(slugs)
+        print(f"Picked random article: {slug}")
+    else:
+        slug = inp.split("/")[-1]
+
+    return get_post_data(slug, config)
+
+
 def generate_tweets_with_cli(post_data, config, ai_cli="gemini"):
-    prompt = config["prompt_template"].format(
+    template = config.get(
+        "prompt_template",
+        "以下のURLについて、X（Twitter）投稿（140文字以内）を5つ作ってください。出力はツイート内容のみを1行ずつ出力してください。\n\nURL: {url}"
+    )
+    prompt = template.format(
         url=post_data["url"],
-        title=post_data["title"],
-        site_name=config.get("site_name", "公式")
+        title=post_data.get("title", ""),
+        site_name=config.get("site_name", "")
     )
     print(f"Generating tweets using {ai_cli} CLI...")
     try:
@@ -80,17 +110,7 @@ def generate_tweets_with_cli(post_data, config, ai_cli="gemini"):
 
 
 def cmd_generate(args, config):
-    posts_file = Path(config["posts_file_path"])
-    content = posts_file.read_text(encoding="utf-8")
-    slugs = re.findall(r'slug:\s*"(.*?)"', content)
-
-    if not args.input:
-        slug = random.choice(slugs)
-        print(f"Picked random article: {slug}")
-    else:
-        slug = args.input.split("/")[-1]
-
-    post_data = get_post_data(slug, config)
+    post_data = resolve_post_data(args, config)
     tweets = generate_tweets_with_cli(post_data, config, ai_cli=args.ai)
 
     if args.auto:
