@@ -42,11 +42,16 @@ cp config.json.sample config.json
 }
 ```
 
-| キー | 説明 |
-|------|------|
-| `posts_file_path` | 記事データファイルのパス（`.ts` / `.js` / `.json`） |
-| `twitter_cli_path` | ローカルにクローンした twitter-cli のパス |
-| `twitter_auth_token` / `twitter_ct0` | 任意。省略するとtwitter-cliがブラウザCookieを自動取得 |
+| キー | 必要なコマンド | 説明 |
+|------|-------------|------|
+| `twitter_cli_path` | 全コマンド | ローカルにクローンした twitter-cli のパス |
+| `site_name` | `generate` のみ | サイト名（プロンプト内で使用） |
+| `base_url` | `generate` のみ | サイトのルートURL（例: `https://your-domain.com`） |
+| `posts_file_path` | `generate` のみ | 記事データファイルのパス（`.ts` / `.js` / `.json`） |
+| `prompt_template` | `generate` のみ | ツイート生成用AIプロンプトのテンプレート |
+| `twitter_auth_token` / `twitter_ct0` | 任意 | 省略するとtwitter-cliがブラウザCookieを自動取得 |
+
+> `feed` / `search` / `like` などの読み取り・書き込み操作だけ使う場合は、`twitter_cli_path` のみ設定すれば動きます。サイト関連のキーは `generate` サブコマンドを使うときだけ必要です。
 
 ### 2. twitter-cli の認証
 

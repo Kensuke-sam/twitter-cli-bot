@@ -44,11 +44,16 @@ Edit `config.json`:
 }
 ```
 
-| Key | Description |
-|-----|-------------|
-| `posts_file_path` | Path to your articles data file (`.ts`, `.js`, `.json`) |
-| `twitter_cli_path` | Path to a local clone of twitter-cli |
-| `twitter_auth_token` / `twitter_ct0` | Optional — twitter-cli can auto-extract from browser cookies |
+| Key | Required for | Description |
+|-----|-------------|-------------|
+| `twitter_cli_path` | All commands | Path to a local clone of twitter-cli |
+| `site_name` | `generate` only | Your site name, used in the prompt |
+| `base_url` | `generate` only | Your site's root URL (e.g. `https://your-domain.com`) |
+| `posts_file_path` | `generate` only | Path to your articles data file (`.ts`, `.js`, `.json`) |
+| `prompt_template` | `generate` only | AI prompt template for tweet generation |
+| `twitter_auth_token` / `twitter_ct0` | Optional | twitter-cli can auto-extract from browser cookies |
+
+> If you only want to use read/write operations (`feed`, `search`, `like`, etc.), only `twitter_cli_path` is required. The site-related keys are only needed for the `generate` subcommand.
 
 ### 2. Authenticate twitter-cli
 
