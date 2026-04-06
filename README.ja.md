@@ -73,6 +73,8 @@ Successfully posted!
 - **トーンプリセット** (`--tone`) — professional / casual / provocative / technical / humorous
 - **投稿履歴** (SQLite) — 重複検出、`history`・`stats` サブコマンド
 - **スマート auto** — `--auto` で投稿済み記事を自動スキップ
+- **バッチ生成** (`generate-batch`) — 未投稿記事を一括処理
+- **文字数カウント** — ツイートごとに文字数表示、280文字超え警告
 - **ドライラン** (`--dry-run`) — 投稿せずプレビュー
 - **クリップボード** (`--clipboard`) — 投稿せずクリップボードにコピー
 - **投稿前編集** — 生成結果をインラインまたは `$EDITOR` で修正可能
@@ -221,6 +223,23 @@ uv run twitter whoami
 
 # 投稿統計を表示
 ./tweet.sh stats
+
+# 履歴をJSONでエクスポート
+./tweet.sh history --json
+./tweet.sh history --json -o history.json
+```
+
+### バッチ生成
+
+```bash
+# 未投稿記事をすべてプレビュー
+./tweet.sh generate-batch --dry-run --ai gemini
+
+# 未投稿記事をすべて投稿
+./tweet.sh generate-batch --ai gemini --tone professional
+
+# 未投稿記事を最大5件まで投稿
+./tweet.sh generate-batch --max 5 --ai gemini
 ```
 
 ### 読み取り操作

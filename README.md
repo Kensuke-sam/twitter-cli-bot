@@ -86,6 +86,8 @@ Successfully posted!
 - **Tone presets** (`--tone`) — professional, casual, provocative, technical, humorous
 - **Post history** (SQLite) — duplicate detection, `history` and `stats` subcommands
 - **Smart auto mode** — `--auto` skips already-posted articles automatically
+- **Batch generation** (`generate-batch`) — process all unposted articles at once
+- **Character count** — displays character count per tweet, warns if >280
 - **Dry-run mode** (`--dry-run`) — preview without posting
 - **Clipboard mode** (`--clipboard`) — copy to clipboard instead of posting
 - **Edit before posting** — modify generated tweets inline or via `$EDITOR`
@@ -234,6 +236,23 @@ Full config with all options:
 
 # View posting statistics
 ./tweet.sh stats
+
+# Export history to JSON
+./tweet.sh history --json
+./tweet.sh history --json -o history.json
+```
+
+### Batch generation
+
+```bash
+# Preview all unposted articles (dry-run)
+./tweet.sh generate-batch --dry-run --ai gemini
+
+# Post all unposted articles
+./tweet.sh generate-batch --ai gemini --tone professional
+
+# Post up to 5 unposted articles
+./tweet.sh generate-batch --max 5 --ai gemini
 ```
 
 ### Read operations

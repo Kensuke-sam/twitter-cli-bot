@@ -376,6 +376,20 @@ def parse_ai_tweets(content, max_count=5):
     return tweets[:max_count]
 
 
+TWEET_CHAR_LIMIT = 280
+
+
+def format_tweet_display(tweet, index, total=None):
+    """ツイートを文字数付きで表示用にフォーマットする"""
+    char_count = len(tweet)
+    warn = " [!280文字超]" if char_count > TWEET_CHAR_LIMIT else ""
+    if total:
+        header = f"[{index}/{total}]"
+    else:
+        header = f"[{index}]"
+    return f"\n{header} ({char_count}文字{warn})\n{tweet}\n" + "-" * 20
+
+
 def copy_to_clipboard(text):
     """テキストをクリップボードにコピーする"""
     system = platform.system()
@@ -433,14 +447,15 @@ def cmd_generate(args, config):
 
     if args.auto:
         tweet = random.choice(tweets)
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         if dry_run:
-            print(f"\n[dry-run] 投稿されるツイート:\n{tweet}")
+            print(f"[{timestamp}] [dry-run] 投稿されるツイート ({len(tweet)}文字):\n{tweet}")
             return
         if clipboard:
             if copy_to_clipboard(tweet):
-                print(f"\nクリップボードにコピーしました:\n{tweet}")
+                print(f"[{timestamp}] クリップボードにコピーしました ({len(tweet)}文字):\n{tweet}")
             return
-        print(f"\nPosting to Twitter:\n{tweet}")
+        print(f"[{timestamp}] Posting to Twitter ({len(tweet)}文字):\n{tweet}")
         run_twitter(config, "post", tweet)
         save_post(tweet, article_url=article_url, tone=tone)
         return
@@ -448,8 +463,7 @@ def cmd_generate(args, config):
     label = topic or post_data.get('title') or post_data.get('url') or "Free-form"
     print(f"\n--- Generated Tweets for: {label} ---")
     for i, t in enumerate(tweets, 1):
-        print(f"\n[{i}]\n{t}")
-        print("-" * 20)
+        print(format_tweet_display(t, i))
 
     if dry_run:
         print("\n[dry-run] プレビューのみ。投稿は行われません。")
@@ -475,8 +489,7 @@ def cmd_generate(args, config):
             idx = int(edit_match.group(1)) - 1
             if 0 <= idx < len(tweets):
                 tweets[idx] = edit_tweet(tweets[idx])
-                print(f"\n[{idx + 1}] (編集済み)\n{tweets[idx]}")
-                print("-" * 20)
+                print(format_tweet_display(tweets[idx], idx + 1) + " (編集済み)")
             else:
                 print(f"  範囲外です。1〜{len(tweets)} の番号を指定してください。")
             continue
@@ -568,8 +581,7 @@ def cmd_generate_thread(args, config):
     label = post_data.get('title') or post_data.get('url') or "Free-form"
     print(f"\n--- Generated Thread for: {label} ({len(tweets)} tweets) ---")
     for i, t in enumerate(tweets, 1):
-        print(f"\n[{i}/{len(tweets)}]\n{t}")
-        print("-" * 20)
+        print(format_tweet_display(t, i, total=len(tweets)))
 
     if dry_run:
         print("\n[dry-run] プレビューのみ。投稿は行われません。")
@@ -610,6 +622,72 @@ def cmd_generate_thread(args, config):
     print(f"\nスレッド投稿完了 ({len(tweets)} tweets)")
 
 
+# --- Batch Generation ---
+
+def cmd_generate_batch(args, config):
+    """未投稿の記事をまとめて生成・投稿する"""
+    if not config.get("posts_file_path"):
+        print("Error: バッチモードには config.json に posts_file_path が必要です。")
+        sys.exit(1)
+
+    posts_file = Path(config["posts_file_path"])
+    if not posts_file.exists():
+        print(f"Error: Posts file not found at {posts_file}")
+        sys.exit(1)
+    content = posts_file.read_text(encoding="utf-8")
+    slugs = re.findall(r'slug:\s*"(.*?)"', content)
+    if not slugs:
+        print("Error: postsファイルにslugが見つかりません。")
+        sys.exit(1)
+
+    base_url = config.get("base_url", "")
+    posted_urls = get_posted_urls()
+    unposted = [s for s in slugs if f"{base_url}/posts/{s}" not in posted_urls]
+
+    if not unposted:
+        print("すべての記事が投稿済みです。")
+        return
+
+    limit = getattr(args, 'max', None) or len(unposted)
+    targets = unposted[:limit]
+    tone = getattr(args, 'tone', None)
+    dry_run = getattr(args, 'dry_run', False)
+    ai_cli = args.ai
+
+    print(f"未投稿記事: {len(unposted)} 件 (処理対象: {len(targets)} 件)")
+    if not dry_run:
+        try:
+            confirm = input("投稿を開始しますか？ (y/N): ").strip().lower()
+        except EOFError:
+            return
+        if confirm != 'y':
+            print("キャンセルしました。")
+            return
+
+    for idx, slug in enumerate(targets, 1):
+        post_data = get_post_data(slug, content, config)
+        article_url = post_data["url"]
+        label = post_data['title'] or slug
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+        print(f"\n[{idx}/{len(targets)}] {label}")
+        tweets = generate_tweets_with_cli(post_data, config, ai_cli=ai_cli, tone=tone)
+        if not tweets:
+            print(f"  Warning: ツイート生成失敗、スキップします。")
+            continue
+
+        tweet = random.choice(tweets)
+        if dry_run:
+            print(f"  [{timestamp}] [dry-run] ({len(tweet)}文字): {tweet[:80]}...")
+        else:
+            print(f"  [{timestamp}] Posting ({len(tweet)}文字): {tweet[:80]}...")
+            run_twitter(config, "post", tweet)
+            save_post(tweet, article_url=article_url, tone=tone)
+
+    status = "プレビュー" if dry_run else "投稿"
+    print(f"\nバッチ{status}完了: {len(targets)} 件")
+
+
 # --- History ---
 
 def cmd_history(args, config):
@@ -624,6 +702,24 @@ def cmd_history(args, config):
 
     if not rows:
         print("投稿履歴はありません。")
+        return
+
+    # JSON エクスポート
+    if getattr(args, 'json', False):
+        data = [
+            {
+                "posted_at": r[0], "text": r[1], "url": r[2],
+                "tone": r[3], "is_thread": bool(r[4])
+            }
+            for r in rows
+        ]
+        output = json.dumps(data, ensure_ascii=False, indent=2)
+        out_file = getattr(args, 'output', None)
+        if out_file:
+            Path(out_file).write_text(output, encoding="utf-8")
+            print(f"{len(data)} 件を {out_file} にエクスポートしました。")
+        else:
+            print(output)
         return
 
     for posted_at, text, url, tone, is_thread in rows:
@@ -960,6 +1056,7 @@ def main():
   [AI生成]
     generate         AIでツイートを生成して投稿
     generate-thread  AIでスレッド（連続ツイート）を生成して投稿
+    generate-batch   未投稿記事をまとめて生成・投稿
 
   [履歴・統計]
     history          投稿履歴を表示
@@ -1019,9 +1116,19 @@ def main():
     p.add_argument("--count", type=int, default=4, metavar="N", help="スレッドのツイート数 (デフォルト: 4)")
     p.set_defaults(func=cmd_generate_thread)
 
+    # generate-batch
+    p = subparsers.add_parser("generate-batch", help="未投稿記事をまとめて生成・投稿")
+    p.add_argument("--ai", choices=["gemini", "codex", "claude"], default="gemini", help="使用するAI CLI")
+    p.add_argument("--tone", choices=list(TONE_PRESETS.keys()), help="ツイートのトーン")
+    p.add_argument("--dry-run", action="store_true", help="投稿せずプレビューのみ")
+    add_max_flag(p)
+    p.set_defaults(func=cmd_generate_batch)
+
     # history
     p = subparsers.add_parser("history", help="投稿履歴を表示")
     add_max_flag(p)
+    p.add_argument("--json", action="store_true", help="JSON形式で出力")
+    p.add_argument("-o", "--output", metavar="FILE", help="ファイルにエクスポート")
     p.set_defaults(func=cmd_history)
 
     # history-clear
