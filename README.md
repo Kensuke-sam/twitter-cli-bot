@@ -35,11 +35,12 @@ No browser, no dashboard, no Twitter API billing.
 ## Demo
 
 ```
-$ ./tweet.sh generate https://example.com/my-article --ai gemini
+$ ./tweet.sh generate https://example.com/my-article --ai gemini --tone provocative
 
 Generating tweets using gemini CLI...
+Tone: provocative
 
---- Generated Tweets ---
+--- Generated Tweets for: https://example.com/my-article ---
 
 [1]
 Most developers ship without thinking about X distribution.
@@ -57,10 +58,19 @@ This shell script does it for you.
 https://example.com/my-article
 --------------------
 
-Choose a tweet to post (1-5, or 'q' to quit): 2
+番号で選択 (1-3), 'e数字' で編集 (例: e1), 'q' で中止: e2
 
-Posting to Twitter:
-You wrote the article. Now automate the tweet. ...
+新しいテキスト:
+Automate your content distribution from the terminal.
+https://example.com/my-article
+
+[2] (編集済み)
+Automate your content distribution from the terminal.
+https://example.com/my-article
+--------------------
+
+番号で選択 (1-3), 'e数字' で編集 (例: e1), 'q' で中止: 2
+
 Successfully posted!
 ```
 
@@ -69,8 +79,17 @@ Successfully posted!
 ## Features
 
 - Generate tweet drafts from any article URL
+- **Free-form generation** (`--topic`) — generate tweets about any theme without a URL
 - Supports Gemini, Claude Code, and Codex CLI as AI backends
 - Interactive draft selection or fully automatic posting
+- **Thread generation** — generate and post multi-tweet threads from articles
+- **Tone presets** (`--tone`) — professional, casual, provocative, technical, humorous
+- **Post history** (SQLite) — duplicate detection, `history` and `stats` subcommands
+- **Smart auto mode** — `--auto` skips already-posted articles automatically
+- **Dry-run mode** (`--dry-run`) — preview without posting
+- **Clipboard mode** (`--clipboard`) — copy to clipboard instead of posting
+- **Edit before posting** — modify generated tweets inline or via `$EDITOR`
+- **Config validation** — clear error messages for misconfigured settings
 - Cron-compatible for scheduled posting
 - Full twitter-cli wrapper: `feed`, `search`, `bookmarks`, `like`, `follow`, and more
 - No Twitter API key needed — uses browser cookies via twitter-cli
@@ -170,6 +189,51 @@ Full config with all options:
 
 # Auto-pick a random article from your posts file and post
 ./tweet.sh generate --auto
+
+# Preview without posting
+./tweet.sh generate https://example.com/my-article --dry-run
+
+# Use a specific tone
+./tweet.sh generate https://example.com/my-article --tone provocative
+
+# Force post even if the URL was posted before
+./tweet.sh generate https://example.com/my-article --force
+
+# Free-form: generate tweets about any topic (no URL needed)
+./tweet.sh generate --topic "Rust vs Go for CLI tools"
+./tweet.sh generate "Today I learned about WebAssembly" --tone casual
+
+# Copy to clipboard instead of posting
+./tweet.sh generate https://example.com/my-article --clipboard
+```
+
+### Generate and post threads
+
+```bash
+# Generate a 4-tweet thread (default)
+./tweet.sh generate-thread https://example.com/my-article --ai gemini
+
+# Generate a 6-tweet thread with a casual tone
+./tweet.sh generate-thread https://example.com/my-article --count 6 --tone casual
+
+# Preview a thread without posting
+./tweet.sh generate-thread https://example.com/my-article --dry-run
+```
+
+### Post history
+
+```bash
+# View recent post history
+./tweet.sh history
+
+# View last 50 posts
+./tweet.sh history --max 50
+
+# Clear all history
+./tweet.sh history-clear
+
+# View posting statistics
+./tweet.sh stats
 ```
 
 ### Read operations
@@ -240,7 +304,8 @@ twitter-cli-bot/
 ├── tweet.sh            # Entry point
 ├── tweet_gen.py        # All subcommand logic
 ├── config.json.sample  # Configuration template
-└── config.json         # Your local config (gitignored)
+├── config.json         # Your local config (gitignored)
+└── history.db          # Post history (gitignored, auto-created)
 ```
 
 ---
@@ -253,6 +318,15 @@ twitter-cli-bot/
 4. Open a pull request
 
 Bug reports and feature requests are welcome via [Issues](https://github.com/Kensuke-sam/twitter-cli-bot/issues).
+
+---
+
+## Next project
+
+This CLI wrapper is the execution-layer foundation.
+
+The next-generation project built on top of this idea is:
+- [twitter-ai-agent](https://github.com/Kensuke-sam/twitter-ai-agent): lightweight CLI-first AI posting engine with history, scoring, and autopilot workflow
 
 ---
 

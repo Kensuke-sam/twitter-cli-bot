@@ -33,11 +33,12 @@ Gemini・Claude・Codex CLIを使ってツイート案を生成し、[twitter-cl
 ## デモ
 
 ```
-$ ./tweet.sh generate https://example.com/my-article --ai gemini
+$ ./tweet.sh generate https://example.com/my-article --ai gemini --tone technical
 
 Generating tweets using gemini CLI...
+Tone: technical
 
---- Generated Tweets ---
+--- Generated Tweets for: https://example.com/my-article ---
 
 [1]
 多くの開発者はX（Twitter）での発信を後回しにしている。
@@ -55,10 +56,8 @@ https://example.com/my-article
 https://example.com/my-article
 --------------------
 
-Choose a tweet to post (1-5, or 'q' to quit): 2
+番号で選択 (1-3), 'e数字' で編集 (例: e1), 'q' で中止: 2
 
-Posting to Twitter:
-記事を書いた。あとはツイートを自動化するだけ。 ...
 Successfully posted!
 ```
 
@@ -67,8 +66,17 @@ Successfully posted!
 ## 特徴
 
 - 任意の記事URLからツイート案を生成
+- **フリーフォーム生成** (`--topic`) — URL不要で自由なテーマからツイート生成
 - Gemini・Claude Code・Codex CLIに対応
 - 対話的な選択または完全自動投稿
+- **スレッド生成** — 記事から複数ツイートのスレッドを生成・投稿
+- **トーンプリセット** (`--tone`) — professional / casual / provocative / technical / humorous
+- **投稿履歴** (SQLite) — 重複検出、`history`・`stats` サブコマンド
+- **スマート auto** — `--auto` で投稿済み記事を自動スキップ
+- **ドライラン** (`--dry-run`) — 投稿せずプレビュー
+- **クリップボード** (`--clipboard`) — 投稿せずクリップボードにコピー
+- **投稿前編集** — 生成結果をインラインまたは `$EDITOR` で修正可能
+- **config バリデーション** — 設定ミスを分かりやすく報告
 - cronによるスケジュール投稿に対応
 - twitter-cliの全機能をラップ：`feed`・`search`・`bookmarks`・`like`・`follow`など
 - Twitter APIキー不要 — twitter-cli経由でブラウザCookieを使用
@@ -168,6 +176,51 @@ uv run twitter whoami
 
 # postsファイルからランダムに記事を選んで自動投稿
 ./tweet.sh generate --auto
+
+# プレビューのみ（投稿しない）
+./tweet.sh generate https://example.com/my-article --dry-run
+
+# トーン指定
+./tweet.sh generate https://example.com/my-article --tone provocative
+
+# 重複無視して強制投稿
+./tweet.sh generate https://example.com/my-article --force
+
+# フリーフォーム: URLなしで自由なテーマから生成
+./tweet.sh generate --topic "RustとGoのCLI開発比較"
+./tweet.sh generate "今日学んだWebAssemblyの話" --tone casual
+
+# クリップボードにコピー（投稿しない）
+./tweet.sh generate https://example.com/my-article --clipboard
+```
+
+### スレッド生成・投稿
+
+```bash
+# 4ツイートのスレッド生成（デフォルト）
+./tweet.sh generate-thread https://example.com/my-article --ai gemini
+
+# 6ツイート、カジュアルなトーンで
+./tweet.sh generate-thread https://example.com/my-article --count 6 --tone casual
+
+# プレビューのみ
+./tweet.sh generate-thread https://example.com/my-article --dry-run
+```
+
+### 投稿履歴
+
+```bash
+# 最近の投稿履歴
+./tweet.sh history
+
+# 直近50件
+./tweet.sh history --max 50
+
+# 履歴をクリア
+./tweet.sh history-clear
+
+# 投稿統計を表示
+./tweet.sh stats
 ```
 
 ### 読み取り操作
@@ -238,7 +291,8 @@ twitter-cli-bot/
 ├── tweet.sh            # エントリポイント
 ├── tweet_gen.py        # サブコマンドのロジック
 ├── config.json.sample  # 設定テンプレート
-└── config.json         # ローカル設定（gitignore済み）
+├── config.json         # ローカル設定（gitignore済み）
+└── history.db          # 投稿履歴（gitignore済み、自動生成）
 ```
 
 ---
@@ -251,6 +305,15 @@ twitter-cli-bot/
 4. プルリクエストを作成
 
 バグ報告や機能要望は[Issues](https://github.com/Kensuke-sam/twitter-cli-bot/issues)からどうぞ。
+
+---
+
+## 次のプロジェクト
+
+このCLIラッパーは実行レイヤーの土台です。
+
+この発想を発展させた次世代プロジェクトは次です。
+- [twitter-ai-agent](https://github.com/Kensuke-sam/twitter-ai-agent): history・score・autopilotを備えた軽量CLI-first AI投稿エンジン
 
 ---
 
