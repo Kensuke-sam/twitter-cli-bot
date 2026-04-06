@@ -7,6 +7,7 @@ import argparse
 import json
 import sqlite3
 import tempfile
+import platform
 from datetime import datetime
 from pathlib import Path
 
@@ -150,8 +151,8 @@ def get_twitter_env(config):
     return env
 
 
-def run_twitter(config, *args):
-    """twitter-cli の任意のコマンドを実行する"""
+def _resolve_twitter_cli_dir(config):
+    """twitter_cli_path を検証して Path を返す"""
     twitter_cli_path = config.get("twitter_cli_path")
     if not twitter_cli_path:
         print("Error: config.json に twitter_cli_path が設定されていません。")
@@ -163,6 +164,12 @@ def run_twitter(config, *args):
     if not twitter_cli_dir.is_dir():
         print(f"Error: twitter_cli_path はディレクトリではありません: {twitter_cli_dir}")
         sys.exit(1)
+    return twitter_cli_dir
+
+
+def run_twitter(config, *args):
+    """twitter-cli の任意のコマンドを実行する"""
+    twitter_cli_dir = _resolve_twitter_cli_dir(config)
     cmd = ["uv", "run", "twitter"] + list(args)
     env = get_twitter_env(config)
     try:
@@ -174,14 +181,7 @@ def run_twitter(config, *args):
 
 def run_twitter_capture(config, *args):
     """twitter-cli を実行し、stdout をキャプチャして返す（スレッド投稿用）"""
-    twitter_cli_path = config.get("twitter_cli_path")
-    if not twitter_cli_path:
-        print("Error: config.json に twitter_cli_path が設定されていません。")
-        sys.exit(1)
-    twitter_cli_dir = Path(twitter_cli_path)
-    if not twitter_cli_dir.exists():
-        print(f"Error: twitter_cli_path が存在しません: {twitter_cli_dir}")
-        sys.exit(1)
+    twitter_cli_dir = _resolve_twitter_cli_dir(config)
     cmd = ["uv", "run", "twitter"] + list(args)
     env = get_twitter_env(config)
     try:
@@ -325,14 +325,21 @@ def generate_tweets_with_cli(post_data, config, ai_cli="gemini", tone=None):
     return parse_ai_tweets(content, max_count=5)
 
 
+AI_TIMEOUT_SECONDS = 120
+
+
 def run_ai_cli(ai_cli, prompt):
-    """AI CLI を実行して stdout を返す"""
+    """AI CLI を実行して stdout を返す（タイムアウト付き）"""
     try:
         result = subprocess.run(
             [ai_cli, prompt],
-            capture_output=True, text=True, encoding="utf-8", check=True
+            capture_output=True, text=True, encoding="utf-8", check=True,
+            timeout=AI_TIMEOUT_SECONDS
         )
         return result.stdout
+    except subprocess.TimeoutExpired:
+        print(f"Error: {ai_cli} が {AI_TIMEOUT_SECONDS} 秒以内に応答しませんでした。")
+        sys.exit(1)
     except subprocess.CalledProcessError as e:
         print(f"Error calling {ai_cli} cli: {e}")
         if e.stderr:
@@ -371,7 +378,6 @@ def parse_ai_tweets(content, max_count=5):
 
 def copy_to_clipboard(text):
     """テキストをクリップボードにコピーする"""
-    import platform
     system = platform.system()
     try:
         if system == "Darwin":
@@ -391,7 +397,7 @@ def cmd_generate(args, config):
     post_data = resolve_post_data(args, config)
     if post_data is None:
         return
-    article_url = post_data.get("url") or None
+    article_url = post_data.get("url") or None  # "" → None に統一
     topic = post_data.get("topic")
     tone = getattr(args, 'tone', None)
     dry_run = getattr(args, 'dry_run', False)
@@ -545,9 +551,10 @@ def cmd_generate_thread(args, config):
     post_data = resolve_post_data(args, config)
     if post_data is None:
         return
-    article_url = post_data.get("url")
+    article_url = post_data.get("url") or None  # "" → None に統一
     tone = getattr(args, 'tone', None)
     dry_run = getattr(args, 'dry_run', False)
+    clipboard = getattr(args, 'clipboard', False)
     count = getattr(args, 'count', 4) or 4
 
     tweets = generate_thread_with_cli(
@@ -558,7 +565,7 @@ def cmd_generate_thread(args, config):
         print("Error: AI がスレッドを生成できませんでした。")
         sys.exit(1)
 
-    label = post_data['title'] if post_data['title'] else post_data['url']
+    label = post_data.get('title') or post_data.get('url') or "Free-form"
     print(f"\n--- Generated Thread for: {label} ({len(tweets)} tweets) ---")
     for i, t in enumerate(tweets, 1):
         print(f"\n[{i}/{len(tweets)}]\n{t}")
@@ -566,6 +573,12 @@ def cmd_generate_thread(args, config):
 
     if dry_run:
         print("\n[dry-run] プレビューのみ。投稿は行われません。")
+        return
+
+    if clipboard:
+        full_thread = "\n\n---\n\n".join(tweets)
+        if copy_to_clipboard(full_thread):
+            print(f"\nスレッド全体をクリップボードにコピーしました ({len(tweets)} tweets)")
         return
 
     try:
@@ -862,6 +875,7 @@ def cmd_post(args, config):
     if getattr(args, 'reply_to', None):
         extra += ["--reply-to", args.reply_to]
     run_twitter(config, *extra)
+    save_post(args.text)
 
 
 def cmd_reply(args, config):
@@ -1001,6 +1015,7 @@ def main():
     p.add_argument("--ai", choices=["gemini", "codex", "claude"], default="gemini", help="使用するAI CLI")
     p.add_argument("--tone", choices=list(TONE_PRESETS.keys()), help="ツイートのトーン")
     p.add_argument("--dry-run", action="store_true", help="投稿せずプレビューのみ")
+    p.add_argument("--clipboard", action="store_true", help="投稿せずクリップボードにコピー")
     p.add_argument("--count", type=int, default=4, metavar="N", help="スレッドのツイート数 (デフォルト: 4)")
     p.set_defaults(func=cmd_generate_thread)
 
