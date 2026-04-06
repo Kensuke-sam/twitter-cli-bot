@@ -87,6 +87,12 @@ Successfully posted!
 - **Post history** (SQLite) — duplicate detection, `history` and `stats` subcommands
 - **Smart auto mode** — `--auto` skips already-posted articles automatically
 - **Batch generation** (`generate-batch`) — process all unposted articles at once
+- **AI improve** (`improve`) — polish a draft text into tweet-ready form
+- **AI reply suggestions** (`reply-suggest`) — generate reply drafts for any tweet
+- **Timeline digest** (`digest`) — AI-powered summary of your timeline
+- **Auto-engage** (`engage`) — auto-like tweets matching keywords
+- **Recycle** (`recycle`) — rephrase past posts for re-posting
+- **Schedule queue** (`schedule-add/list/run/remove`) — queue tweets for timed posting via cron
 - **Character count** — displays character count per tweet, warns if >280
 - **Dry-run mode** (`--dry-run`) — preview without posting
 - **Clipboard mode** (`--clipboard`) — copy to clipboard instead of posting
@@ -253,6 +259,52 @@ Full config with all options:
 
 # Post up to 5 unposted articles
 ./tweet.sh generate-batch --max 5 --ai gemini
+```
+
+### AI-assisted operations
+
+```bash
+# Improve a draft text into tweet-ready form
+./tweet.sh improve "I built a CLI tool for Twitter" --ai gemini --tone professional
+
+# Generate reply suggestions for a tweet
+./tweet.sh reply-suggest 1234567890 --ai gemini --tone casual
+
+# Get an AI summary of your timeline
+./tweet.sh digest --ai gemini --max 30
+
+# Auto-like tweets matching keywords
+./tweet.sh engage "Rust CLI" "developer tools" --max 5
+./tweet.sh engage "AI agent" --dry-run
+
+# Rephrase and re-post a past tweet
+./tweet.sh recycle --ai gemini --tone humorous
+./tweet.sh recycle --dry-run
+```
+
+### Schedule queue
+
+```bash
+# Add a tweet to the schedule queue
+./tweet.sh schedule-add "Scheduled tweet text" --at "2026-04-06T18:00"
+
+# View the schedule queue
+./tweet.sh schedule-list
+
+# Post all tweets whose scheduled time has passed
+./tweet.sh schedule-run
+
+# Preview without posting
+./tweet.sh schedule-run --dry-run
+
+# Remove a tweet from the queue
+./tweet.sh schedule-remove 3
+```
+
+To auto-post scheduled tweets via cron:
+
+```cron
+*/5 * * * * cd ~/twitter-cli-bot && ./tweet.sh schedule-run >> bot.log 2>&1
 ```
 
 ### Read operations

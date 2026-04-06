@@ -35,7 +35,7 @@ def validate_config(config, command):
     warnings = []
 
     # twitter_cli_path は全コマンドで必要（history 系除く）
-    if command not in ("history", "history-clear", "stats"):
+    if command not in ("history", "history-clear", "stats", "schedule-add", "schedule-list", "schedule-remove"):
         tcp = config.get("twitter_cli_path", "").strip()
         if not tcp:
             errors.append("twitter_cli_path が設定されていません。")
@@ -815,6 +815,470 @@ def cmd_stats(args, config):
             print(f"  {day}: {bar} ({cnt})")
 
 
+# --- AI-Powered Twitter Operations ---
+
+def cmd_improve(args, config):
+    """下書きテキストをAIでTwitter向けに改善する"""
+    text = args.text
+    tone = getattr(args, 'tone', None)
+    clipboard = getattr(args, 'clipboard', False)
+    ai_cli = args.ai
+
+    prompt = (
+        "以下の文章をX（Twitter）投稿として改善してください。\n"
+        "改善版を3つ作ってください。それぞれ異なるアプローチで。\n"
+        "出力はツイート内容のみを1行ずつ出力してください。番号は付けないでください。\n"
+        f"280文字以内に収めてください。\n\n元の文章: {text}"
+    )
+    if tone and tone in TONE_PRESETS:
+        prompt = f"【トーン指定】{TONE_PRESETS[tone]}\n\n{prompt}"
+
+    print(f"Improving tweet using {ai_cli} CLI...")
+    content = run_ai_cli(ai_cli, prompt)
+    tweets = parse_ai_tweets(content, max_count=3)
+
+    if not tweets:
+        print("Error: AI が改善案を生成できませんでした。")
+        sys.exit(1)
+
+    print(f"\n--- Original ---\n{text} ({len(text)}文字)")
+    print(f"\n--- Improved Versions ---")
+    for i, t in enumerate(tweets, 1):
+        print(format_tweet_display(t, i))
+
+    if getattr(args, 'dry_run', False):
+        return
+
+    while True:
+        try:
+            actions = f"番号で投稿 (1-{len(tweets)}), 'e数字' で編集, 'c数字' でコピー, 'o' で元のまま投稿, 'q' で中止"
+            choice = input(f"\n{actions}: ").strip()
+        except EOFError:
+            break
+        if choice.lower() == 'q':
+            break
+        if choice.lower() == 'o':
+            if clipboard:
+                copy_to_clipboard(text)
+                print("元のテキストをクリップボードにコピーしました。")
+            else:
+                run_twitter(config, "post", text)
+                save_post(text)
+            break
+
+        edit_match = re.match(r'^e(\d+)$', choice.lower())
+        if edit_match:
+            idx = int(edit_match.group(1)) - 1
+            if 0 <= idx < len(tweets):
+                tweets[idx] = edit_tweet(tweets[idx])
+                print(format_tweet_display(tweets[idx], idx + 1) + " (編集済み)")
+            continue
+
+        clip_match = re.match(r'^c(\d+)$', choice.lower())
+        if clip_match:
+            idx = int(clip_match.group(1)) - 1
+            if 0 <= idx < len(tweets):
+                if copy_to_clipboard(tweets[idx]):
+                    print("  クリップボードにコピーしました。")
+            continue
+
+        try:
+            idx = int(choice) - 1
+        except ValueError:
+            continue
+        if 0 <= idx < len(tweets):
+            if clipboard:
+                copy_to_clipboard(tweets[idx])
+                print("クリップボードにコピーしました。")
+            else:
+                run_twitter(config, "post", tweets[idx])
+                save_post(tweets[idx], tone=tone)
+            break
+
+
+def cmd_reply_suggest(args, config):
+    """特定ツイートへのリプライ案をAI生成する"""
+    tweet_id = args.tweet_id
+    ai_cli = args.ai
+    tone = getattr(args, 'tone', None)
+
+    # ツイート内容を取得
+    print(f"ツイート {tweet_id} を取得中...")
+    tweet_content = run_twitter_capture(config, "tweet", tweet_id, "--json")
+    if not tweet_content:
+        print("Error: ツイートの取得に失敗しました。")
+        sys.exit(1)
+
+    # JSON パースを試みる。失敗したら生テキストを使う
+    try:
+        tweet_data = json.loads(tweet_content)
+        if isinstance(tweet_data, list) and tweet_data:
+            tweet_text = tweet_data[0].get("text", tweet_content)
+            tweet_author = tweet_data[0].get("user", {}).get("screen_name", "")
+        elif isinstance(tweet_data, dict):
+            tweet_text = tweet_data.get("text", tweet_content)
+            tweet_author = tweet_data.get("user", {}).get("screen_name", "")
+        else:
+            tweet_text = tweet_content
+            tweet_author = ""
+    except (json.JSONDecodeError, TypeError):
+        tweet_text = tweet_content.strip()
+        tweet_author = ""
+
+    author_info = f" (@{tweet_author})" if tweet_author else ""
+    print(f"\n--- 元のツイート{author_info} ---\n{tweet_text[:280]}")
+
+    prompt = (
+        "以下のツイートに対する自然なリプライを5つ作ってください。\n"
+        "AIっぽくない、人間が書いたような自然な口調で。\n"
+        "共感、質問、補足情報、ユーモアなど多様なアプローチで。\n"
+        "出力はリプライ内容のみを1行ずつ出力してください。\n"
+        f"\n元のツイート: {tweet_text}"
+    )
+    if tone and tone in TONE_PRESETS:
+        prompt = f"【トーン指定】{TONE_PRESETS[tone]}\n\n{prompt}"
+
+    print(f"\nリプライ案を生成中 ({ai_cli})...")
+    content = run_ai_cli(ai_cli, prompt)
+    replies = parse_ai_tweets(content, max_count=5)
+
+    if not replies:
+        print("Error: リプライ案を生成できませんでした。")
+        sys.exit(1)
+
+    print(f"\n--- Reply Suggestions ---")
+    for i, r in enumerate(replies, 1):
+        print(format_tweet_display(r, i))
+
+    if getattr(args, 'dry_run', False):
+        return
+
+    while True:
+        try:
+            choice = input(f"\n番号でリプライ (1-{len(replies)}), 'e数字' で編集, 'q' で中止: ").strip()
+        except EOFError:
+            break
+        if choice.lower() == 'q':
+            break
+
+        edit_match = re.match(r'^e(\d+)$', choice.lower())
+        if edit_match:
+            idx = int(edit_match.group(1)) - 1
+            if 0 <= idx < len(replies):
+                replies[idx] = edit_tweet(replies[idx])
+                print(format_tweet_display(replies[idx], idx + 1) + " (編集済み)")
+            continue
+
+        try:
+            idx = int(choice) - 1
+        except ValueError:
+            continue
+        if 0 <= idx < len(replies):
+            run_twitter(config, "reply", tweet_id, replies[idx])
+            save_post(replies[idx])
+            break
+
+
+def cmd_digest(args, config):
+    """タイムラインをAIで要約する"""
+    ai_cli = args.ai
+    max_tweets = getattr(args, 'max', 20) or 20
+    feed_type = getattr(args, 'type', None)
+
+    # タイムラインを取得
+    extra = ["feed", "--json", "--max", str(max_tweets)]
+    if feed_type:
+        extra += ["-t", feed_type]
+
+    print(f"タイムライン取得中 (最大 {max_tweets} 件)...")
+    feed_output = run_twitter_capture(config, *extra)
+
+    if not feed_output:
+        print("Error: タイムラインの取得に失敗しました。")
+        sys.exit(1)
+
+    # ツイートテキストを抽出
+    try:
+        feed_data = json.loads(feed_output)
+    except json.JSONDecodeError:
+        # JSON パース失敗 → 生テキストを使う
+        feed_data = None
+
+    if feed_data and isinstance(feed_data, list):
+        tweet_texts = []
+        for item in feed_data[:max_tweets]:
+            user = item.get("user", {}).get("screen_name", "?")
+            text = item.get("text", "")
+            if text:
+                tweet_texts.append(f"@{user}: {text}")
+        timeline_text = "\n".join(tweet_texts)
+    else:
+        timeline_text = feed_output[:5000]
+
+    if not timeline_text.strip():
+        print("タイムラインが空です。")
+        return
+
+    prompt = (
+        "以下はX（Twitter）のタイムラインです。\n"
+        "これを以下の形式で要約してください：\n\n"
+        "1. **今日の主要トピック**（3-5個、箇条書き）\n"
+        "2. **注目のツイート**（特に反応が多そうなもの1-2個を引用）\n"
+        "3. **全体の雰囲気**（1文で）\n\n"
+        f"タイムライン:\n{timeline_text[:4000]}"
+    )
+
+    print(f"AI で要約中 ({ai_cli})...")
+    content = run_ai_cli(ai_cli, prompt)
+    print(f"\n--- Timeline Digest ---\n{content.strip()}")
+
+
+def cmd_engage(args, config):
+    """キーワードにマッチするツイートに自動いいねする"""
+    keywords = args.keywords
+    max_count = getattr(args, 'max', 10) or 10
+    dry_run = getattr(args, 'dry_run', False)
+
+    for keyword in keywords:
+        print(f"\n検索中: \"{keyword}\" ...")
+        search_output = run_twitter_capture(config, "search", keyword, "-t", "Latest", "--max", str(max_count), "--json")
+
+        if not search_output:
+            print(f"  検索結果なし。")
+            continue
+
+        try:
+            results = json.loads(search_output)
+        except json.JSONDecodeError:
+            print(f"  検索結果のパースに失敗しました。")
+            continue
+
+        if not isinstance(results, list):
+            continue
+
+        liked = 0
+        for tweet in results:
+            tweet_id = tweet.get("id_str") or tweet.get("id")
+            text = tweet.get("text", "")[:80]
+            user = tweet.get("user", {}).get("screen_name", "?")
+            if not tweet_id:
+                continue
+
+            if dry_run:
+                print(f"  [dry-run] Like: @{user}: {text}...")
+            else:
+                print(f"  Like: @{user}: {text}...")
+                run_twitter(config, "like", str(tweet_id))
+            liked += 1
+
+        status = "プレビュー" if dry_run else "いいね"
+        print(f"  → {liked} 件 {status}")
+
+
+def cmd_recycle(args, config):
+    """過去の投稿をAIでリフレーズして再投稿する"""
+    ai_cli = args.ai
+    tone = getattr(args, 'tone', None)
+    dry_run = getattr(args, 'dry_run', False)
+
+    db = init_db()
+    rows = db.execute(
+        "SELECT id, tweet_text, posted_at FROM posts WHERE is_thread = 0 ORDER BY posted_at DESC LIMIT 20"
+    ).fetchall()
+    db.close()
+
+    if not rows:
+        print("リサイクル可能な過去の投稿がありません。")
+        return
+
+    print("--- 過去の投稿 ---")
+    for i, (pid, text, posted_at) in enumerate(rows, 1):
+        print(f"\n[{i}] ({posted_at[:10]})")
+        print(f"  {text[:100]}{'...' if len(text) > 100 else ''}")
+
+    try:
+        choice = input(f"\nリフレーズする投稿を選択 (1-{len(rows)}, 'q' で中止): ").strip()
+    except EOFError:
+        return
+    if choice.lower() == 'q':
+        return
+    try:
+        idx = int(choice) - 1
+    except ValueError:
+        print("無効な入力です。")
+        return
+    if not (0 <= idx < len(rows)):
+        print("範囲外です。")
+        return
+
+    original = rows[idx][1]
+    prompt = (
+        "以下の過去のツイートを、同じ内容を伝えつつ全く違う言い回しでリフレーズしてください。\n"
+        "コピーではなく、新鮮に聞こえるように。3つのバリエーションを作ってください。\n"
+        "出力はツイート内容のみを1行ずつ出力してください。\n"
+        f"\n元のツイート: {original}"
+    )
+    if tone and tone in TONE_PRESETS:
+        prompt = f"【トーン指定】{TONE_PRESETS[tone]}\n\n{prompt}"
+
+    print(f"\nリフレーズ中 ({ai_cli})...")
+    content = run_ai_cli(ai_cli, prompt)
+    tweets = parse_ai_tweets(content, max_count=3)
+
+    if not tweets:
+        print("Error: リフレーズを生成できませんでした。")
+        return
+
+    print(f"\n--- Original ---\n{original}")
+    print(f"\n--- Recycled Versions ---")
+    for i, t in enumerate(tweets, 1):
+        print(format_tweet_display(t, i))
+
+    if dry_run:
+        return
+
+    while True:
+        try:
+            choice = input(f"\n番号で投稿 (1-{len(tweets)}), 'e数字' で編集, 'q' で中止: ").strip()
+        except EOFError:
+            break
+        if choice.lower() == 'q':
+            break
+
+        edit_match = re.match(r'^e(\d+)$', choice.lower())
+        if edit_match:
+            idx = int(edit_match.group(1)) - 1
+            if 0 <= idx < len(tweets):
+                tweets[idx] = edit_tweet(tweets[idx])
+                print(format_tweet_display(tweets[idx], idx + 1) + " (編集済み)")
+            continue
+
+        try:
+            idx = int(choice) - 1
+        except ValueError:
+            continue
+        if 0 <= idx < len(tweets):
+            run_twitter(config, "post", tweets[idx])
+            save_post(tweets[idx], tone=tone)
+            break
+
+
+# --- Schedule Queue ---
+
+QUEUE_TABLE = "schedule_queue"
+
+
+def init_queue_db():
+    db = init_db()
+    db.execute(f"""
+        CREATE TABLE IF NOT EXISTS {QUEUE_TABLE} (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            tweet_text TEXT NOT NULL,
+            scheduled_at TEXT NOT NULL,
+            status TEXT DEFAULT 'pending',
+            created_at TEXT NOT NULL
+        )
+    """)
+    db.commit()
+    return db
+
+
+def cmd_schedule_add(args, config):
+    """ツイートをキューに追加する"""
+    text = args.text
+    scheduled_at = args.at
+
+    # 日時パース検証
+    try:
+        dt = datetime.fromisoformat(scheduled_at)
+    except ValueError:
+        print(f"Error: 日時フォーマットが不正です: {scheduled_at}")
+        print("  例: 2026-04-06T18:00 or 2026-04-06 18:00")
+        sys.exit(1)
+
+    db = init_queue_db()
+    db.execute(
+        f"INSERT INTO {QUEUE_TABLE} (tweet_text, scheduled_at, created_at) VALUES (?, ?, ?)",
+        (text, dt.isoformat(), datetime.now().isoformat())
+    )
+    db.commit()
+    db.close()
+    print(f"キューに追加しました: {dt.strftime('%Y-%m-%d %H:%M')} → {text[:60]}...")
+
+
+def cmd_schedule_list(args, config):
+    """キュー内のツイートを一覧表示する"""
+    db = init_queue_db()
+    rows = db.execute(
+        f"SELECT id, tweet_text, scheduled_at, status FROM {QUEUE_TABLE} ORDER BY scheduled_at"
+    ).fetchall()
+    db.close()
+
+    if not rows:
+        print("キューは空です。")
+        return
+
+    pending = [r for r in rows if r[3] == 'pending']
+    posted = [r for r in rows if r[3] == 'posted']
+
+    if pending:
+        print(f"\n--- 予約中 ({len(pending)} 件) ---")
+        for qid, text, sched, status in pending:
+            print(f"  [{qid}] {sched[:16]} → {text[:60]}{'...' if len(text) > 60 else ''}")
+
+    if posted:
+        print(f"\n--- 投稿済み ({len(posted)} 件) ---")
+        for qid, text, sched, status in posted:
+            print(f"  [{qid}] {sched[:16]} → {text[:60]}{'...' if len(text) > 60 else ''}")
+
+
+def cmd_schedule_run(args, config):
+    """予約時刻を過ぎたキュー内のツイートを投稿する"""
+    now = datetime.now().isoformat()
+    db = init_queue_db()
+    rows = db.execute(
+        f"SELECT id, tweet_text, scheduled_at FROM {QUEUE_TABLE} WHERE status = 'pending' AND scheduled_at <= ? ORDER BY scheduled_at",
+        (now,)
+    ).fetchall()
+
+    if not rows:
+        print("投稿すべきツイートはありません。")
+        db.close()
+        return
+
+    dry_run = getattr(args, 'dry_run', False)
+
+    for qid, text, sched in rows:
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        if dry_run:
+            print(f"[{timestamp}] [dry-run] [{qid}] {text[:80]}...")
+        else:
+            print(f"[{timestamp}] Posting [{qid}]: {text[:80]}...")
+            run_twitter(config, "post", text)
+            db.execute(f"UPDATE {QUEUE_TABLE} SET status = 'posted' WHERE id = ?", (qid,))
+            db.commit()
+            save_post(text)
+
+    status = "プレビュー" if dry_run else "投稿"
+    print(f"\n{len(rows)} 件 {status}完了")
+    db.close()
+
+
+def cmd_schedule_remove(args, config):
+    """キューからツイートを削除する"""
+    qid = args.id
+    db = init_queue_db()
+    row = db.execute(f"SELECT tweet_text FROM {QUEUE_TABLE} WHERE id = ? AND status = 'pending'", (qid,)).fetchone()
+    if not row:
+        print(f"Error: ID {qid} の予約が見つかりません（投稿済みまたは存在しない）。")
+        db.close()
+        return
+    db.execute(f"DELETE FROM {QUEUE_TABLE} WHERE id = ?", (qid,))
+    db.commit()
+    db.close()
+    print(f"削除しました: {row[0][:60]}...")
+
+
 # --- Read Operations ---
 
 def cmd_feed(args, config):
@@ -1058,6 +1522,19 @@ def main():
     generate-thread  AIでスレッド（連続ツイート）を生成して投稿
     generate-batch   未投稿記事をまとめて生成・投稿
 
+  [AI支援]
+    improve          下書きテキストをAIで改善
+    reply-suggest    ツイートへのリプライ案をAI生成
+    digest           タイムラインをAIで要約
+    engage           キーワードにマッチするツイートに自動いいね
+    recycle          過去の投稿をAIでリフレーズして再投稿
+
+  [スケジュール]
+    schedule-add     ツイートを予約キューに追加
+    schedule-list    予約キューを一覧表示
+    schedule-run     予約時刻を過ぎたツイートを投稿
+    schedule-remove  予約キューからツイートを削除
+
   [履歴・統計]
     history          投稿履歴を表示
     history-clear    投稿履歴をすべて削除
@@ -1138,6 +1615,62 @@ def main():
     # stats
     p = subparsers.add_parser("stats", help="投稿統計を表示")
     p.set_defaults(func=cmd_stats)
+
+    # improve
+    p = subparsers.add_parser("improve", help="下書きテキストをAIで改善")
+    p.add_argument("text", help="改善したいテキスト")
+    p.add_argument("--ai", choices=["gemini", "codex", "claude"], default="gemini", help="使用するAI CLI")
+    p.add_argument("--tone", choices=list(TONE_PRESETS.keys()), help="ツイートのトーン")
+    p.add_argument("--clipboard", action="store_true", help="投稿せずクリップボードにコピー")
+    p.set_defaults(func=cmd_improve)
+
+    # reply-suggest
+    p = subparsers.add_parser("reply-suggest", help="ツイートへのリプライ案をAI生成")
+    add_tweet_id_arg(p)
+    p.add_argument("--ai", choices=["gemini", "codex", "claude"], default="gemini", help="使用するAI CLI")
+    p.add_argument("--tone", choices=list(TONE_PRESETS.keys()), help="リプライのトーン")
+    p.set_defaults(func=cmd_reply_suggest)
+
+    # digest
+    p = subparsers.add_parser("digest", help="タイムラインをAIで要約")
+    p.add_argument("--ai", choices=["gemini", "codex", "claude"], default="gemini", help="使用するAI CLI")
+    p.add_argument("-t", "--type", choices=["following"], help="following タイムライン")
+    add_max_flag(p)
+    p.set_defaults(func=cmd_digest)
+
+    # engage
+    p = subparsers.add_parser("engage", help="キーワードにマッチするツイートに自動いいね")
+    p.add_argument("keywords", nargs="+", help="検索キーワード（複数指定可）")
+    add_max_flag(p)
+    p.add_argument("--dry-run", action="store_true", help="いいねせずプレビューのみ")
+    p.set_defaults(func=cmd_engage)
+
+    # recycle
+    p = subparsers.add_parser("recycle", help="過去の投稿をAIでリフレーズして再投稿")
+    p.add_argument("--ai", choices=["gemini", "codex", "claude"], default="gemini", help="使用するAI CLI")
+    p.add_argument("--tone", choices=list(TONE_PRESETS.keys()), help="ツイートのトーン")
+    p.add_argument("--dry-run", action="store_true", help="投稿せずプレビューのみ")
+    p.set_defaults(func=cmd_recycle)
+
+    # schedule-add
+    p = subparsers.add_parser("schedule-add", help="ツイートを予約キューに追加")
+    p.add_argument("text", help="投稿するテキスト")
+    p.add_argument("--at", required=True, metavar="DATETIME", help="予約日時 (例: 2026-04-06T18:00)")
+    p.set_defaults(func=cmd_schedule_add)
+
+    # schedule-list
+    p = subparsers.add_parser("schedule-list", help="予約キューを一覧表示")
+    p.set_defaults(func=cmd_schedule_list)
+
+    # schedule-run
+    p = subparsers.add_parser("schedule-run", help="予約時刻を過ぎたツイートを投稿")
+    p.add_argument("--dry-run", action="store_true", help="投稿せずプレビューのみ")
+    p.set_defaults(func=cmd_schedule_run)
+
+    # schedule-remove
+    p = subparsers.add_parser("schedule-remove", help="予約キューからツイートを削除")
+    p.add_argument("id", type=int, help="削除するキューID")
+    p.set_defaults(func=cmd_schedule_remove)
 
     # feed
     p = subparsers.add_parser("feed", help="タイムライン表示")
@@ -1294,8 +1827,8 @@ def main():
         parser.print_help()
         return
 
-    # history/stats 系は config 不要
-    if args.command in ("history", "history-clear", "stats"):
+    # config 不要なコマンド（SQLiteのみで完結）
+    if args.command in ("history", "history-clear", "stats", "schedule-add", "schedule-list", "schedule-remove"):
         if not hasattr(args, 'func'):
             parser.print_help()
             return

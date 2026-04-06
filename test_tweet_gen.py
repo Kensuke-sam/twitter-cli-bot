@@ -240,5 +240,70 @@ class TestCopyToClipboard(unittest.TestCase):
         self.assertFalse(result)
 
 
+class TestScheduleQueue(unittest.TestCase):
+    """スケジュールキュー機能のテスト"""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.db_path = Path(self.tmp) / "test_history.db"
+        self.patcher = patch.object(tweet_gen, 'get_db_path', return_value=self.db_path)
+        self.patcher.start()
+
+    def tearDown(self):
+        self.patcher.stop()
+        if self.db_path.exists():
+            self.db_path.unlink()
+        os.rmdir(self.tmp)
+
+    def test_init_queue_db_creates_table(self):
+        db = tweet_gen.init_queue_db()
+        tables = db.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
+            (tweet_gen.QUEUE_TABLE,)
+        ).fetchone()
+        db.close()
+        self.assertIsNotNone(tables)
+
+    def test_schedule_add_and_list(self):
+        args = MagicMock(text="Test scheduled tweet", at="2026-04-06T18:00")
+        tweet_gen.cmd_schedule_add(args, {})
+
+        db = tweet_gen.init_queue_db()
+        rows = db.execute(f"SELECT tweet_text, status FROM {tweet_gen.QUEUE_TABLE}").fetchall()
+        db.close()
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0][0], "Test scheduled tweet")
+        self.assertEqual(rows[0][1], "pending")
+
+    def test_schedule_add_invalid_datetime(self):
+        args = MagicMock(text="Test", at="not-a-date")
+        with self.assertRaises(SystemExit):
+            tweet_gen.cmd_schedule_add(args, {})
+
+    def test_schedule_remove(self):
+        args_add = MagicMock(text="To be removed", at="2026-04-06T18:00")
+        tweet_gen.cmd_schedule_add(args_add, {})
+
+        db = tweet_gen.init_queue_db()
+        row = db.execute(f"SELECT id FROM {tweet_gen.QUEUE_TABLE}").fetchone()
+        db.close()
+
+        args_remove = MagicMock(id=row[0])
+        tweet_gen.cmd_schedule_remove(args_remove, {})
+
+        db = tweet_gen.init_queue_db()
+        remaining = db.execute(f"SELECT id FROM {tweet_gen.QUEUE_TABLE}").fetchall()
+        db.close()
+        self.assertEqual(len(remaining), 0)
+
+
+class TestValidateConfigNewCommands(unittest.TestCase):
+    """新コマンドの validate_config テスト"""
+
+    def test_schedule_commands_skip_validation(self):
+        for cmd in ("schedule-add", "schedule-list", "schedule-remove"):
+            tweet_gen.validate_config({}, cmd)  # エラーなく通る
+
+
 if __name__ == "__main__":
     unittest.main()

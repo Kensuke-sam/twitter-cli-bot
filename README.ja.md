@@ -74,6 +74,12 @@ Successfully posted!
 - **投稿履歴** (SQLite) — 重複検出、`history`・`stats` サブコマンド
 - **スマート auto** — `--auto` で投稿済み記事を自動スキップ
 - **バッチ生成** (`generate-batch`) — 未投稿記事を一括処理
+- **AI改善** (`improve`) — 下書きテキストをAIでツイート向けにブラッシュアップ
+- **AIリプライ提案** (`reply-suggest`) — 特定ツイートへのリプライ案をAI生成
+- **タイムライン要約** (`digest`) — タイムラインをAIで要約
+- **自動エンゲージ** (`engage`) — キーワードにマッチするツイートに自動いいね
+- **リサイクル** (`recycle`) — 過去の投稿をAIでリフレーズして再投稿
+- **スケジュール投稿** (`schedule-add/list/run/remove`) — 予約キューでcron投稿
 - **文字数カウント** — ツイートごとに文字数表示、280文字超え警告
 - **ドライラン** (`--dry-run`) — 投稿せずプレビュー
 - **クリップボード** (`--clipboard`) — 投稿せずクリップボードにコピー
@@ -240,6 +246,52 @@ uv run twitter whoami
 
 # 未投稿記事を最大5件まで投稿
 ./tweet.sh generate-batch --max 5 --ai gemini
+```
+
+### AI支援操作
+
+```bash
+# 下書きテキストをAIで改善
+./tweet.sh improve "CLIツールを作った話" --ai gemini --tone professional
+
+# ツイートへのリプライ案をAI生成
+./tweet.sh reply-suggest 1234567890 --ai gemini --tone casual
+
+# タイムラインをAIで要約
+./tweet.sh digest --ai gemini --max 30
+
+# キーワードにマッチするツイートに自動いいね
+./tweet.sh engage "Rust CLI" "開発者ツール" --max 5
+./tweet.sh engage "AIエージェント" --dry-run
+
+# 過去の投稿をAIでリフレーズして再投稿
+./tweet.sh recycle --ai gemini --tone humorous
+./tweet.sh recycle --dry-run
+```
+
+### スケジュール投稿
+
+```bash
+# ツイートを予約キューに追加
+./tweet.sh schedule-add "予約ツイートのテキスト" --at "2026-04-06T18:00"
+
+# 予約キューを一覧表示
+./tweet.sh schedule-list
+
+# 予約時刻を過ぎたツイートを投稿
+./tweet.sh schedule-run
+
+# プレビューのみ
+./tweet.sh schedule-run --dry-run
+
+# 予約キューから削除
+./tweet.sh schedule-remove 3
+```
+
+cronで自動投稿する場合：
+
+```cron
+*/5 * * * * cd ~/twitter-cli-bot && ./tweet.sh schedule-run >> bot.log 2>&1
 ```
 
 ### 読み取り操作
