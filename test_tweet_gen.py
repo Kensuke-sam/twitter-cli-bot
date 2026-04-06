@@ -71,6 +71,22 @@ class TestParseAiTweets(unittest.TestCase):
         result = tweet_gen.parse_ai_tweets(content, max_count=5)
         self.assertEqual(result[0], "日本語のツイートです")
 
+    def test_curly_quotes_stripped(self):
+        content = "\u201cThis is a curly quoted tweet\u201d"
+        result = tweet_gen.parse_ai_tweets(content, max_count=5)
+        self.assertEqual(result[0], "This is a curly quoted tweet")
+
+    def test_double_corner_quotes_stripped(self):
+        content = "『二重鉤括弧で囲まれたツイート』"
+        result = tweet_gen.parse_ai_tweets(content, max_count=5)
+        self.assertEqual(result[0], "二重鉤括弧で囲まれたツイート")
+
+    def test_closing_quote_at_start_not_stripped(self):
+        """行頭の閉じ括弧は除去しない"""
+        content = "」で始まるツイートは珍しいが残すべき"
+        result = tweet_gen.parse_ai_tweets(content, max_count=5)
+        self.assertEqual(result[0], "」で始まるツイートは珍しいが残すべき")
+
 
 class TestExtractTweetId(unittest.TestCase):
     """extract_tweet_id のテスト"""
@@ -384,6 +400,297 @@ class TestBuildTwitterArgs(unittest.TestCase):
                          yaml=False, json=False, output=None)
         result = tweet_gen._build_twitter_args(args, "search", ["rust"])
         self.assertEqual(result, ["search", "rust"])
+
+
+class TestScheduleRun(unittest.TestCase):
+    """cmd_schedule_run のテスト"""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.db_path = Path(self.tmp) / "test_history.db"
+        self.patcher = patch.object(tweet_gen, 'get_db_path', return_value=self.db_path)
+        self.patcher.start()
+
+    def tearDown(self):
+        self.patcher.stop()
+        if self.db_path.exists():
+            self.db_path.unlink()
+        os.rmdir(self.tmp)
+
+    def test_run_posts_due_tweets(self):
+        """予約時刻を過ぎたツイートが投稿される"""
+        # 過去の日時で予約を追加
+        args_add = MagicMock(text="Past tweet", at="2020-01-01T00:00")
+        tweet_gen.cmd_schedule_add(args_add, {})
+
+        with patch.object(tweet_gen, 'run_twitter') as mock_run:
+            args_run = MagicMock(dry_run=False)
+            tweet_gen.cmd_schedule_run(args_run, {"twitter_cli_path": "/tmp"})
+            mock_run.assert_called_once()
+
+        # ステータスが posted に更新されたことを確認
+        db = tweet_gen.init_queue_db()
+        row = db.execute(
+            f"SELECT status FROM {tweet_gen.QUEUE_TABLE}"
+        ).fetchone()
+        db.close()
+        self.assertEqual(row[0], "posted")
+
+    def test_run_dry_run_does_not_post(self):
+        """dry-run では投稿されない"""
+        args_add = MagicMock(text="Dry run tweet", at="2020-01-01T00:00")
+        tweet_gen.cmd_schedule_add(args_add, {})
+
+        with patch.object(tweet_gen, 'run_twitter') as mock_run:
+            args_run = MagicMock(dry_run=True)
+            tweet_gen.cmd_schedule_run(args_run, {"twitter_cli_path": "/tmp"})
+            mock_run.assert_not_called()
+
+        # ステータスが pending のまま
+        db = tweet_gen.init_queue_db()
+        row = db.execute(
+            f"SELECT status FROM {tweet_gen.QUEUE_TABLE}"
+        ).fetchone()
+        db.close()
+        self.assertEqual(row[0], "pending")
+
+    def test_run_skips_future_tweets(self):
+        """未来の予約はスキップされる"""
+        args_add = MagicMock(text="Future tweet", at="2099-12-31T23:59")
+        tweet_gen.cmd_schedule_add(args_add, {})
+
+        with patch.object(tweet_gen, 'run_twitter') as mock_run:
+            args_run = MagicMock(dry_run=False)
+            tweet_gen.cmd_schedule_run(args_run, {"twitter_cli_path": "/tmp"})
+            mock_run.assert_not_called()
+
+    def test_run_empty_queue(self):
+        """キューが空の場合でもエラーにならない"""
+        args_run = MagicMock(dry_run=False)
+        tweet_gen.cmd_schedule_run(args_run, {})  # エラーなく通る
+
+
+class TestDraftEditAndPost(unittest.TestCase):
+    """cmd_draft_edit / cmd_draft_post のテスト"""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.db_path = Path(self.tmp) / "test_history.db"
+        self.patcher = patch.object(tweet_gen, 'get_db_path', return_value=self.db_path)
+        self.patcher.start()
+
+    def tearDown(self):
+        self.patcher.stop()
+        if self.db_path.exists():
+            self.db_path.unlink()
+        os.rmdir(self.tmp)
+
+    def test_draft_edit_updates_text(self):
+        """下書き編集でテキストが更新される"""
+        args_save = MagicMock(text="Original draft", tone=None)
+        tweet_gen.cmd_draft_save(args_save, {})
+
+        db = tweet_gen.init_drafts_db()
+        row = db.execute(f"SELECT id FROM {tweet_gen.DRAFTS_TABLE}").fetchone()
+        db.close()
+
+        with patch.object(tweet_gen, 'edit_tweet', return_value="Edited draft"):
+            args_edit = MagicMock(id=row[0])
+            tweet_gen.cmd_draft_edit(args_edit, {})
+
+        db = tweet_gen.init_drafts_db()
+        updated = db.execute(f"SELECT text FROM {tweet_gen.DRAFTS_TABLE} WHERE id = ?", (row[0],)).fetchone()
+        db.close()
+        self.assertEqual(updated[0], "Edited draft")
+
+    def test_draft_edit_nonexistent_id(self):
+        """存在しない ID を指定してもエラーにならない"""
+        args_edit = MagicMock(id=9999)
+        tweet_gen.cmd_draft_edit(args_edit, {})  # エラーなく通る
+
+    def test_draft_post_removes_draft(self):
+        """投稿後に下書きが削除される"""
+        args_save = MagicMock(text="Post me", tone=None)
+        tweet_gen.cmd_draft_save(args_save, {})
+
+        db = tweet_gen.init_drafts_db()
+        row = db.execute(f"SELECT id FROM {tweet_gen.DRAFTS_TABLE}").fetchone()
+        db.close()
+
+        with patch.object(tweet_gen, 'run_twitter'), \
+             patch('builtins.input', return_value='y'):
+            args_post = MagicMock(id=row[0], dry_run=False)
+            tweet_gen.cmd_draft_post(args_post, {"twitter_cli_path": "/tmp"})
+
+        db = tweet_gen.init_drafts_db()
+        remaining = db.execute(f"SELECT id FROM {tweet_gen.DRAFTS_TABLE}").fetchall()
+        db.close()
+        self.assertEqual(len(remaining), 0)
+
+    def test_draft_post_dry_run_keeps_draft(self):
+        """dry-run では下書きが残る"""
+        args_save = MagicMock(text="Keep me", tone=None)
+        tweet_gen.cmd_draft_save(args_save, {})
+
+        db = tweet_gen.init_drafts_db()
+        row = db.execute(f"SELECT id FROM {tweet_gen.DRAFTS_TABLE}").fetchone()
+        db.close()
+
+        args_post = MagicMock(id=row[0], dry_run=True)
+        tweet_gen.cmd_draft_post(args_post, {})
+
+        db = tweet_gen.init_drafts_db()
+        remaining = db.execute(f"SELECT id FROM {tweet_gen.DRAFTS_TABLE}").fetchall()
+        db.close()
+        self.assertEqual(len(remaining), 1)
+
+
+class TestEditTweet(unittest.TestCase):
+    """edit_tweet のテスト"""
+
+    @patch.dict(os.environ, {"EDITOR": "", "VISUAL": ""}, clear=False)
+    def test_fallback_empty_input_keeps_original(self):
+        """EDITOR 未設定 + 空入力で元のテキストが返る"""
+        with patch('builtins.input', return_value=''):
+            result = tweet_gen.edit_tweet("original text")
+        self.assertEqual(result, "original text")
+
+    @patch.dict(os.environ, {"EDITOR": "", "VISUAL": ""}, clear=False)
+    def test_fallback_new_input_replaces(self):
+        """EDITOR 未設定 + 入力ありで新しいテキストが返る"""
+        with patch('builtins.input', return_value='new text'):
+            result = tweet_gen.edit_tweet("original text")
+        self.assertEqual(result, "new text")
+
+
+class TestCmdHistory(unittest.TestCase):
+    """cmd_history のテスト"""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.db_path = Path(self.tmp) / "test_history.db"
+        self.patcher = patch.object(tweet_gen, 'get_db_path', return_value=self.db_path)
+        self.patcher.start()
+
+    def tearDown(self):
+        self.patcher.stop()
+        # JSON エクスポートテストで export.json が生成されるため、
+        # db ファイルだけでなく tmp 内の全ファイルを削除する
+        for f in Path(self.tmp).iterdir():
+            f.unlink()
+        os.rmdir(self.tmp)
+
+    def test_history_empty(self):
+        """履歴なしの場合"""
+        args = MagicMock(max=20, json=False, output=None)
+        tweet_gen.cmd_history(args, {})  # エラーなく通る
+
+    def test_history_json_export(self):
+        """JSON エクスポートが正しく動作する"""
+        tweet_gen.save_post("test tweet 1", article_url="https://example.com/a")
+        tweet_gen.save_post("test tweet 2", tone="casual")
+
+        out_file = Path(self.tmp) / "export.json"
+        args = MagicMock(max=20, json=True, output=str(out_file))
+        tweet_gen.cmd_history(args, {})
+
+        self.assertTrue(out_file.exists())
+        data = json.loads(out_file.read_text(encoding="utf-8"))
+        self.assertEqual(len(data), 2)
+        # 最新が先頭（DESC）
+        self.assertEqual(data[0]["text"], "test tweet 2")
+        self.assertEqual(data[0]["tone"], "casual")
+
+    def test_history_respects_max(self):
+        """--max が反映される"""
+        for i in range(5):
+            tweet_gen.save_post(f"tweet {i}")
+
+        out_file = Path(self.tmp) / "export.json"
+        args = MagicMock(max=2, json=True, output=str(out_file))
+        tweet_gen.cmd_history(args, {})
+
+        data = json.loads(out_file.read_text(encoding="utf-8"))
+        self.assertEqual(len(data), 2)
+
+
+class TestCmdStats(unittest.TestCase):
+    """cmd_stats のテスト"""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.db_path = Path(self.tmp) / "test_history.db"
+        self.patcher = patch.object(tweet_gen, 'get_db_path', return_value=self.db_path)
+        self.patcher.start()
+
+    def tearDown(self):
+        self.patcher.stop()
+        if self.db_path.exists():
+            self.db_path.unlink()
+        os.rmdir(self.tmp)
+
+    def test_stats_empty(self):
+        """履歴なしの場合"""
+        args = MagicMock()
+        tweet_gen.cmd_stats(args, {})  # エラーなく通る
+
+    def test_stats_with_data(self):
+        """データがある場合の統計表示"""
+        tweet_gen.save_post("single tweet", article_url="https://example.com/a", tone="casual")
+        tweet_gen.save_post("thread tweet", tone="professional", is_thread=True)
+        tweet_gen.save_post("free tweet")
+
+        args = MagicMock()
+        # 例外が出ずに完了することを検証
+        tweet_gen.cmd_stats(args, {})
+
+
+class TestCmdHistoryClear(unittest.TestCase):
+    """cmd_history_clear のテスト"""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.db_path = Path(self.tmp) / "test_history.db"
+        self.patcher = patch.object(tweet_gen, 'get_db_path', return_value=self.db_path)
+        self.patcher.start()
+
+    def tearDown(self):
+        self.patcher.stop()
+        if self.db_path.exists():
+            self.db_path.unlink()
+        os.rmdir(self.tmp)
+
+    def test_clear_empty_history(self):
+        """履歴なしで clear してもエラーにならない"""
+        args = MagicMock()
+        tweet_gen.cmd_history_clear(args, {})
+
+    def test_clear_with_confirmation(self):
+        """確認 'y' で履歴が削除される"""
+        tweet_gen.save_post("to be deleted")
+        tweet_gen.save_post("also deleted")
+
+        with patch('builtins.input', return_value='y'):
+            args = MagicMock()
+            tweet_gen.cmd_history_clear(args, {})
+
+        db = tweet_gen.init_db()
+        count = db.execute("SELECT COUNT(*) FROM posts").fetchone()[0]
+        db.close()
+        self.assertEqual(count, 0)
+
+    def test_clear_cancelled(self):
+        """確認 'n' で履歴が残る"""
+        tweet_gen.save_post("should remain")
+
+        with patch('builtins.input', return_value='n'):
+            args = MagicMock()
+            tweet_gen.cmd_history_clear(args, {})
+
+        db = tweet_gen.init_db()
+        count = db.execute("SELECT COUNT(*) FROM posts").fetchone()[0]
+        db.close()
+        self.assertEqual(count, 1)
 
 
 if __name__ == "__main__":

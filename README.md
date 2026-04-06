@@ -82,7 +82,7 @@ Successfully posted!
 - **Free-form generation** (`--topic`) — generate tweets about any theme without a URL
 - Supports Gemini, Claude Code, and Codex CLI as AI backends
 - Interactive draft selection or fully automatic posting
-- **Thread generation** — generate and post multi-tweet threads from articles
+- **Thread generation** — generate and post multi-tweet threads from articles or any topic
 - **Tone presets** (`--tone`) — professional, casual, provocative, technical, humorous
 - **Post history** (SQLite) — duplicate detection, `history` and `stats` subcommands
 - **Smart auto mode** — `--auto` skips already-posted articles automatically
@@ -229,6 +229,9 @@ Full config with all options:
 # Generate a 6-tweet thread with a casual tone
 ./tweet.sh generate-thread https://example.com/my-article --count 6 --tone casual
 
+# Free-form thread about any topic (no URL needed)
+./tweet.sh generate-thread --topic "The evolution of CLI tools"
+
 # Preview a thread without posting
 ./tweet.sh generate-thread https://example.com/my-article --dry-run
 ```
@@ -272,8 +275,14 @@ Full config with all options:
 # Improve a draft text into tweet-ready form
 ./tweet.sh improve "I built a CLI tool for Twitter" --ai gemini --tone professional
 
+# Preview improvements without posting
+./tweet.sh improve "I built a CLI tool for Twitter" --dry-run
+
 # Generate reply suggestions for a tweet
 ./tweet.sh reply-suggest 1234567890 --ai gemini --tone casual
+
+# Preview reply suggestions without posting
+./tweet.sh reply-suggest 1234567890 --dry-run
 
 # Get an AI summary of your timeline
 ./tweet.sh digest --ai gemini --max 30

@@ -372,9 +372,9 @@ def parse_ai_tweets(content, max_count=5):
         # マークダウンのボールド/イタリックを除去
         line = re.sub(r'\*\*(.*?)\*\*', r'\1', line)
         line = re.sub(r'^\s*[-\*]\s+', '', line)
-        # 引用符を除去
-        line = re.sub(r'^[「」『』"""\']', '', line)
-        line = re.sub(r'[「」『』"""\']$', '', line)
+        # 引用符を除去（行頭は開き引用符、行末は閉じ引用符のみ）
+        line = re.sub(r'^[「『"\u201c\']', '', line)
+        line = re.sub(r'[」』"\u201d\']$', '', line)
         line = line.strip()
         if line and len(line) >= 10:  # 短すぎるゴミ行を除外
             tweets.append(line)
@@ -527,18 +527,30 @@ def cmd_generate(args, config):
 # --- Thread Generation ---
 
 def generate_thread_with_cli(post_data, config, ai_cli="gemini", tone=None, count=4):
-    """記事からスレッド用の連続ツイートを生成する"""
-    thread_prompt = (
-        f"以下のURLについて、X（Twitter）のスレッド（連続ツイート）を{count}件作ってください。\n"
-        "1件目はフックとなる導入ツイート、中間は記事の要点、最後はまとめとURL紹介にしてください。\n"
+    """記事またはトピックからスレッド用の連続ツイートを生成する"""
+    output_instructions = (
         "各ツイートは140文字以内。出力はツイート内容のみを空行で区切って出力してください。\n"
         "番号は付けないでください。\n"
     )
-    url = post_data["url"]
-    title = post_data.get("title", "")
-    thread_prompt += f"\nURL: {url}"
-    if title:
-        thread_prompt += f"\nタイトル: {title}"
+    topic = post_data.get("topic")
+    if topic:
+        thread_prompt = (
+            f"以下のテーマについて、X（Twitter）のスレッド（連続ツイート）を{count}件作ってください。\n"
+            "1件目はフックとなる導入ツイート、中間はテーマの要点、最後はまとめにしてください。\n"
+            f"{output_instructions}"
+            f"\nテーマ: {topic}"
+        )
+    else:
+        thread_prompt = (
+            f"以下のURLについて、X（Twitter）のスレッド（連続ツイート）を{count}件作ってください。\n"
+            "1件目はフックとなる導入ツイート、中間は記事の要点、最後はまとめとURL紹介にしてください。\n"
+            f"{output_instructions}"
+        )
+        url = post_data["url"]
+        title = post_data.get("title", "")
+        thread_prompt += f"\nURL: {url}"
+        if title:
+            thread_prompt += f"\nタイトル: {title}"
     site_name = config.get("site_name", "")
     if site_name:
         thread_prompt += f"\nサイト名: {site_name}"
@@ -703,6 +715,7 @@ def cmd_history(args, config):
         "FROM posts ORDER BY posted_at DESC LIMIT ?",
         (limit,)
     ).fetchall()
+    total = db.execute("SELECT COUNT(*) FROM posts").fetchone()[0]
     db.close()
 
     if not rows:
@@ -739,9 +752,6 @@ def cmd_history(args, config):
         if url:
             print(f"  URL: {url}")
 
-    total_db = init_db()
-    total = total_db.execute("SELECT COUNT(*) FROM posts").fetchone()[0]
-    total_db.close()
     print(f"\n表示: {len(rows)} / 全 {total} 件")
 
 
@@ -1925,7 +1935,8 @@ def main():
 
     # generate-thread
     p = subparsers.add_parser("generate-thread", help="AIでスレッドを生成して投稿")
-    p.add_argument("input", nargs="?", help="記事URLまたはslug")
+    p.add_argument("input", nargs="?", help="記事URL、slug、またはフリーテーマ")
+    p.add_argument("--topic", metavar="THEME", help="自由なテーマからスレッド生成（URL不要）")
     p.add_argument("--ai", choices=["gemini", "codex", "claude"], default="gemini", help="使用するAI CLI")
     p.add_argument("--tone", choices=list(TONE_PRESETS.keys()), help="ツイートのトーン")
     p.add_argument("--dry-run", action="store_true", help="投稿せずプレビューのみ")
@@ -1961,6 +1972,7 @@ def main():
     p.add_argument("text", help="改善したいテキスト")
     p.add_argument("--ai", choices=["gemini", "codex", "claude"], default="gemini", help="使用するAI CLI")
     p.add_argument("--tone", choices=list(TONE_PRESETS.keys()), help="ツイートのトーン")
+    p.add_argument("--dry-run", action="store_true", help="投稿せずプレビューのみ")
     p.add_argument("--clipboard", action="store_true", help="投稿せずクリップボードにコピー")
     p.set_defaults(func=cmd_improve)
 
@@ -1969,6 +1981,7 @@ def main():
     add_tweet_id_arg(p)
     p.add_argument("--ai", choices=["gemini", "codex", "claude"], default="gemini", help="使用するAI CLI")
     p.add_argument("--tone", choices=list(TONE_PRESETS.keys()), help="リプライのトーン")
+    p.add_argument("--dry-run", action="store_true", help="投稿せずプレビューのみ")
     p.set_defaults(func=cmd_reply_suggest)
 
     # digest

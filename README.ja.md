@@ -69,7 +69,7 @@ Successfully posted!
 - **フリーフォーム生成** (`--topic`) — URL不要で自由なテーマからツイート生成
 - Gemini・Claude Code・Codex CLIに対応
 - 対話的な選択または完全自動投稿
-- **スレッド生成** — 記事から複数ツイートのスレッドを生成・投稿
+- **スレッド生成** — 記事または自由なテーマから複数ツイートのスレッドを生成・投稿
 - **トーンプリセット** (`--tone`) — professional / casual / provocative / technical / humorous
 - **投稿履歴** (SQLite) — 重複検出、`history`・`stats` サブコマンド
 - **スマート auto** — `--auto` で投稿済み記事を自動スキップ
@@ -216,6 +216,9 @@ uv run twitter whoami
 # 6ツイート、カジュアルなトーンで
 ./tweet.sh generate-thread https://example.com/my-article --count 6 --tone casual
 
+# フリーフォーム: URLなしで自由なテーマからスレッド生成
+./tweet.sh generate-thread --topic "CLIツールの進化"
+
 # プレビューのみ
 ./tweet.sh generate-thread https://example.com/my-article --dry-run
 ```
@@ -259,8 +262,14 @@ uv run twitter whoami
 # 下書きテキストをAIで改善
 ./tweet.sh improve "CLIツールを作った話" --ai gemini --tone professional
 
+# 改善案のプレビューのみ（投稿しない）
+./tweet.sh improve "CLIツールを作った話" --dry-run
+
 # ツイートへのリプライ案をAI生成
 ./tweet.sh reply-suggest 1234567890 --ai gemini --tone casual
+
+# リプライ案のプレビューのみ（投稿しない）
+./tweet.sh reply-suggest 1234567890 --dry-run
 
 # タイムラインをAIで要約
 ./tweet.sh digest --ai gemini --max 30
