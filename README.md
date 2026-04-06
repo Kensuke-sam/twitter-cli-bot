@@ -92,6 +92,11 @@ Successfully posted!
 - **Timeline digest** (`digest`) — AI-powered summary of your timeline
 - **Auto-engage** (`engage`) — auto-like tweets matching keywords
 - **Recycle** (`recycle`) — rephrase past posts for re-posting
+- **User analysis** (`analyze`) — AI-powered analysis of any user's posting patterns
+- **Translate** (`translate`) — translate tweets for cross-posting (en, ja, zh, ko, es, fr, de, pt)
+- **Trend analysis** (`trending`) — AI analysis of keyword trends from latest tweets
+- **Chain workflow** (`chain`) — generate → improve → post/schedule in one command
+- **Draft management** (`draft-save/list/edit/post/delete`) — local draft storage with SQLite
 - **Schedule queue** (`schedule-add/list/run/remove`) — queue tweets for timed posting via cron
 - **Character count** — displays character count per tweet, warns if >280
 - **Dry-run mode** (`--dry-run`) — preview without posting
@@ -280,6 +285,61 @@ Full config with all options:
 # Rephrase and re-post a past tweet
 ./tweet.sh recycle --ai gemini --tone humorous
 ./tweet.sh recycle --dry-run
+```
+
+### User analysis and trends
+
+```bash
+# Analyze a user's posting patterns
+./tweet.sh analyze username --ai gemini --max 30
+
+# Analyze trends for a keyword
+./tweet.sh trending "AI agent" --ai gemini --max 30
+```
+
+### Translate and cross-post
+
+```bash
+# Translate a tweet to English
+./tweet.sh translate "CLIからTwitterを自動化する話" --lang en --ai gemini
+
+# Translate to Korean
+./tweet.sh translate "Built a CLI tool for Twitter" --lang ko
+
+# Preview translation without posting
+./tweet.sh translate "テスト" --lang en --dry-run
+```
+
+### Draft management
+
+```bash
+# Save a draft locally
+./tweet.sh draft-save "Work in progress tweet" --tone casual
+
+# List all drafts
+./tweet.sh draft-list
+
+# Edit a draft
+./tweet.sh draft-edit 1
+
+# Post a draft
+./tweet.sh draft-post 1
+
+# Delete a draft
+./tweet.sh draft-delete 1
+```
+
+### Chain workflow (generate → improve → post)
+
+```bash
+# Full workflow: generate, improve, then post
+./tweet.sh chain https://example.com/my-article --ai gemini --tone professional
+
+# Chain with scheduled posting
+./tweet.sh chain --topic "Rust vs Go" --ai gemini --at "2026-04-06T18:00"
+
+# Chain with dry-run
+./tweet.sh chain https://example.com/my-article --dry-run
 ```
 
 ### Schedule queue

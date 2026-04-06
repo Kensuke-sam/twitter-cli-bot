@@ -79,6 +79,11 @@ Successfully posted!
 - **タイムライン要約** (`digest`) — タイムラインをAIで要約
 - **自動エンゲージ** (`engage`) — キーワードにマッチするツイートに自動いいね
 - **リサイクル** (`recycle`) — 過去の投稿をAIでリフレーズして再投稿
+- **ユーザー分析** (`analyze`) — 特定ユーザーの投稿傾向をAI分析
+- **翻訳** (`translate`) — ツイートを多言語翻訳してクロスポスト（en, ja, zh, ko, es, fr, de, pt）
+- **トレンド分析** (`trending`) — キーワードのトレンドをAIで分析
+- **チェーンワークフロー** (`chain`) — 生成→改善→投稿/スケジュールを一気通貫で実行
+- **下書き管理** (`draft-save/list/edit/post/delete`) — ローカルに下書きをSQLite管理
 - **スケジュール投稿** (`schedule-add/list/run/remove`) — 予約キューでcron投稿
 - **文字数カウント** — ツイートごとに文字数表示、280文字超え警告
 - **ドライラン** (`--dry-run`) — 投稿せずプレビュー
@@ -267,6 +272,61 @@ uv run twitter whoami
 # 過去の投稿をAIでリフレーズして再投稿
 ./tweet.sh recycle --ai gemini --tone humorous
 ./tweet.sh recycle --dry-run
+```
+
+### ユーザー分析・トレンド
+
+```bash
+# ユーザーの投稿傾向を分析
+./tweet.sh analyze username --ai gemini --max 30
+
+# キーワードのトレンドをAI分析
+./tweet.sh trending "AIエージェント" --ai gemini --max 30
+```
+
+### 翻訳・クロスポスト
+
+```bash
+# 英語に翻訳
+./tweet.sh translate "CLIからTwitterを自動化する話" --lang en --ai gemini
+
+# 韓国語に翻訳
+./tweet.sh translate "Built a CLI tool for Twitter" --lang ko
+
+# プレビューのみ
+./tweet.sh translate "テスト" --lang en --dry-run
+```
+
+### 下書き管理
+
+```bash
+# 下書きを保存
+./tweet.sh draft-save "書きかけのツイート" --tone casual
+
+# 下書き一覧
+./tweet.sh draft-list
+
+# 下書きを編集
+./tweet.sh draft-edit 1
+
+# 下書きを投稿
+./tweet.sh draft-post 1
+
+# 下書きを削除
+./tweet.sh draft-delete 1
+```
+
+### チェーンワークフロー（生成→改善→投稿）
+
+```bash
+# フルワークフロー: 生成、改善、投稿
+./tweet.sh chain https://example.com/my-article --ai gemini --tone professional
+
+# スケジュール付きチェーン
+./tweet.sh chain --topic "RustとGo比較" --ai gemini --at "2026-04-06T18:00"
+
+# ドライラン
+./tweet.sh chain https://example.com/my-article --dry-run
 ```
 
 ### スケジュール投稿

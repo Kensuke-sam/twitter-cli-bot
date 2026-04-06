@@ -304,6 +304,87 @@ class TestValidateConfigNewCommands(unittest.TestCase):
         for cmd in ("schedule-add", "schedule-list", "schedule-remove"):
             tweet_gen.validate_config({}, cmd)  # エラーなく通る
 
+    def test_draft_commands_skip_validation(self):
+        for cmd in ("draft-save", "draft-list", "draft-edit", "draft-delete"):
+            tweet_gen.validate_config({}, cmd)  # エラーなく通る
+
+
+class TestDrafts(unittest.TestCase):
+    """下書き機能のテスト"""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.db_path = Path(self.tmp) / "test_history.db"
+        self.patcher = patch.object(tweet_gen, 'get_db_path', return_value=self.db_path)
+        self.patcher.start()
+
+    def tearDown(self):
+        self.patcher.stop()
+        if self.db_path.exists():
+            self.db_path.unlink()
+        os.rmdir(self.tmp)
+
+    def test_init_drafts_db_creates_table(self):
+        db = tweet_gen.init_drafts_db()
+        tables = db.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
+            (tweet_gen.DRAFTS_TABLE,)
+        ).fetchone()
+        db.close()
+        self.assertIsNotNone(tables)
+
+    def test_draft_save_and_list(self):
+        args = MagicMock(text="My draft tweet", tone="casual")
+        tweet_gen.cmd_draft_save(args, {})
+
+        db = tweet_gen.init_drafts_db()
+        rows = db.execute(f"SELECT text, tone FROM {tweet_gen.DRAFTS_TABLE}").fetchall()
+        db.close()
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0][0], "My draft tweet")
+        self.assertEqual(rows[0][1], "casual")
+
+    def test_draft_delete(self):
+        args_save = MagicMock(text="To be deleted", tone=None)
+        tweet_gen.cmd_draft_save(args_save, {})
+
+        db = tweet_gen.init_drafts_db()
+        row = db.execute(f"SELECT id FROM {tweet_gen.DRAFTS_TABLE}").fetchone()
+        db.close()
+
+        args_del = MagicMock(id=row[0])
+        tweet_gen.cmd_draft_delete(args_del, {})
+
+        db = tweet_gen.init_drafts_db()
+        remaining = db.execute(f"SELECT id FROM {tweet_gen.DRAFTS_TABLE}").fetchall()
+        db.close()
+        self.assertEqual(len(remaining), 0)
+
+
+class TestBuildTwitterArgs(unittest.TestCase):
+    """_build_twitter_args ヘルパーのテスト"""
+
+    def test_basic_command(self):
+        args = MagicMock(compact=False, type=None, max=None, filter=False,
+                         yaml=False, json=False, output=None)
+        result = tweet_gen._build_twitter_args(args, "feed")
+        self.assertEqual(result, ["feed"])
+
+    def test_with_all_flags(self):
+        args = MagicMock(compact=True, type="following", max=30, filter=True,
+                         yaml=False, json=True, output="out.json")
+        result = tweet_gen._build_twitter_args(args, "feed")
+        self.assertIn("-c", result)
+        self.assertIn("--json", result)
+        self.assertIn("--max", result)
+        self.assertIn("-o", result)
+
+    def test_with_positional(self):
+        args = MagicMock(compact=False, type=None, max=None, filter=False,
+                         yaml=False, json=False, output=None)
+        result = tweet_gen._build_twitter_args(args, "search", ["rust"])
+        self.assertEqual(result, ["search", "rust"])
+
 
 if __name__ == "__main__":
     unittest.main()

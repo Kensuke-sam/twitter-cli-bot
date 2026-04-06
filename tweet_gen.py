@@ -35,7 +35,12 @@ def validate_config(config, command):
     warnings = []
 
     # twitter_cli_path は全コマンドで必要（history 系除く）
-    if command not in ("history", "history-clear", "stats", "schedule-add", "schedule-list", "schedule-remove"):
+    config_free_cmds = (
+        "history", "history-clear", "stats",
+        "schedule-add", "schedule-list", "schedule-remove",
+        "draft-save", "draft-list", "draft-edit", "draft-delete",
+    )
+    if command not in config_free_cmds:
         tcp = config.get("twitter_cli_path", "").strip()
         if not tcp:
             errors.append("twitter_cli_path が設定されていません。")
@@ -1279,13 +1284,416 @@ def cmd_schedule_remove(args, config):
     print(f"削除しました: {row[0][:60]}...")
 
 
+# --- Drafts (Local) ---
+
+DRAFTS_TABLE = "drafts"
+
+
+def init_drafts_db():
+    db = init_db()
+    db.execute(f"""
+        CREATE TABLE IF NOT EXISTS {DRAFTS_TABLE} (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            text TEXT NOT NULL,
+            tone TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )
+    """)
+    db.commit()
+    return db
+
+
+def cmd_draft_save(args, config):
+    """下書きをローカルに保存する"""
+    text = args.text
+    tone = getattr(args, 'tone', None)
+    now = datetime.now().isoformat()
+    db = init_drafts_db()
+    db.execute(
+        f"INSERT INTO {DRAFTS_TABLE} (text, tone, created_at, updated_at) VALUES (?, ?, ?, ?)",
+        (text, tone, now, now)
+    )
+    db.commit()
+    db.close()
+    print(f"下書きを保存しました: {text[:60]}{'...' if len(text) > 60 else ''}")
+
+
+def cmd_draft_list(args, config):
+    """下書き一覧を表示する"""
+    db = init_drafts_db()
+    rows = db.execute(
+        f"SELECT id, text, tone, created_at FROM {DRAFTS_TABLE} ORDER BY updated_at DESC"
+    ).fetchall()
+    db.close()
+
+    if not rows:
+        print("下書きはありません。")
+        return
+
+    print(f"\n--- 下書き ({len(rows)} 件) ---")
+    for did, text, tone, created_at in rows:
+        tone_tag = f" [{tone}]" if tone else ""
+        print(f"\n  [{did}]{tone_tag} ({created_at[:10]})")
+        print(f"  {text[:100]}{'...' if len(text) > 100 else ''}")
+        print(f"  ({len(text)}文字)")
+
+
+def cmd_draft_edit(args, config):
+    """下書きを編集する"""
+    did = args.id
+    db = init_drafts_db()
+    row = db.execute(f"SELECT text FROM {DRAFTS_TABLE} WHERE id = ?", (did,)).fetchone()
+    if not row:
+        print(f"Error: ID {did} の下書きが見つかりません。")
+        db.close()
+        return
+    new_text = edit_tweet(row[0])
+    db.execute(
+        f"UPDATE {DRAFTS_TABLE} SET text = ?, updated_at = ? WHERE id = ?",
+        (new_text, datetime.now().isoformat(), did)
+    )
+    db.commit()
+    db.close()
+    print(f"下書きを更新しました ({len(new_text)}文字): {new_text[:60]}...")
+
+
+def cmd_draft_post(args, config):
+    """下書きを投稿する"""
+    did = args.id
+    dry_run = getattr(args, 'dry_run', False)
+    db = init_drafts_db()
+    row = db.execute(f"SELECT text, tone FROM {DRAFTS_TABLE} WHERE id = ?", (did,)).fetchone()
+    if not row:
+        print(f"Error: ID {did} の下書きが見つかりません。")
+        db.close()
+        return
+    text, tone = row
+
+    print(f"\n投稿する下書き ({len(text)}文字):\n  {text}")
+
+    if dry_run:
+        print("\n[dry-run] プレビューのみ。")
+        db.close()
+        return
+
+    try:
+        confirm = input("\n投稿しますか？ (y/N): ").strip().lower()
+    except EOFError:
+        db.close()
+        return
+    if confirm != 'y':
+        print("キャンセルしました。")
+        db.close()
+        return
+
+    run_twitter(config, "post", text)
+    save_post(text, tone=tone)
+    db.execute(f"DELETE FROM {DRAFTS_TABLE} WHERE id = ?", (did,))
+    db.commit()
+    db.close()
+    print("投稿完了。下書きを削除しました。")
+
+
+def cmd_draft_delete(args, config):
+    """下書きを削除する"""
+    did = args.id
+    db = init_drafts_db()
+    row = db.execute(f"SELECT text FROM {DRAFTS_TABLE} WHERE id = ?", (did,)).fetchone()
+    if not row:
+        print(f"Error: ID {did} の下書きが見つかりません。")
+        db.close()
+        return
+    db.execute(f"DELETE FROM {DRAFTS_TABLE} WHERE id = ?", (did,))
+    db.commit()
+    db.close()
+    print(f"下書きを削除しました: {row[0][:60]}...")
+
+
+# --- Advanced AI Operations ---
+
+def cmd_analyze(args, config):
+    """特定ユーザーの投稿傾向をAI分析する"""
+    username = args.username
+    ai_cli = args.ai
+    max_tweets = getattr(args, 'max', 20) or 20
+
+    print(f"@{username} のツイートを取得中 (最大 {max_tweets} 件)...")
+    output = run_twitter_capture(config, "user-posts", username, "--max", str(max_tweets), "--json")
+
+    if not output:
+        print("Error: ツイートの取得に失敗しました。")
+        sys.exit(1)
+
+    try:
+        tweets_data = json.loads(output)
+    except json.JSONDecodeError:
+        tweets_data = None
+
+    if tweets_data and isinstance(tweets_data, list):
+        tweet_texts = [t.get("text", "") for t in tweets_data if t.get("text")]
+        timeline_text = "\n---\n".join(tweet_texts)
+    else:
+        timeline_text = output[:5000]
+
+    prompt = (
+        f"以下は @{username} の最近のツイートです。\n"
+        "このユーザーの投稿傾向を分析してください：\n\n"
+        "1. **主なトピック・関心領域**（3-5個）\n"
+        "2. **投稿スタイルの特徴**（口調、長さ、絵文字使用、ハッシュタグなど）\n"
+        "3. **エンゲージメント戦略**（どんな投稿がウケそうか）\n"
+        "4. **投稿頻度・時間帯の傾向**\n"
+        "5. **このアカウントとの効果的な交流方法**\n\n"
+        f"ツイート:\n{timeline_text[:4000]}"
+    )
+
+    print(f"AI で分析中 ({ai_cli})...")
+    content = run_ai_cli(ai_cli, prompt)
+    print(f"\n--- @{username} の投稿分析 ---\n{content.strip()}")
+
+
+def cmd_translate(args, config):
+    """ツイートを翻訳してクロスポストする"""
+    text = args.text
+    target = getattr(args, 'lang', 'en')
+    ai_cli = args.ai
+    dry_run = getattr(args, 'dry_run', False)
+    clipboard = getattr(args, 'clipboard', False)
+
+    lang_names = {"en": "English", "ja": "Japanese", "zh": "Chinese", "ko": "Korean",
+                  "es": "Spanish", "fr": "French", "de": "German", "pt": "Portuguese"}
+    lang_name = lang_names.get(target, target)
+
+    prompt = (
+        f"以下のツイートを{lang_name}に翻訳してください。\n"
+        "X（Twitter）投稿として自然に読めるように意訳してOK。\n"
+        "直訳ではなく、その言語のネイティブが書いたような文章にしてください。\n"
+        "3つのバリエーションを作ってください。\n"
+        "出力は翻訳内容のみを1行ずつ出力してください。\n"
+        f"\n元のツイート: {text}"
+    )
+
+    print(f"Translating to {lang_name} using {ai_cli}...")
+    content = run_ai_cli(ai_cli, prompt)
+    tweets = parse_ai_tweets(content, max_count=3)
+
+    if not tweets:
+        print("Error: 翻訳を生成できませんでした。")
+        sys.exit(1)
+
+    print(f"\n--- Original ---\n{text} ({len(text)}文字)")
+    print(f"\n--- {lang_name} Translations ---")
+    for i, t in enumerate(tweets, 1):
+        print(format_tweet_display(t, i))
+
+    if dry_run:
+        return
+
+    while True:
+        try:
+            actions = f"番号で投稿 (1-{len(tweets)}), 'e数字' で編集, 'q' で中止"
+            choice = input(f"\n{actions}: ").strip()
+        except EOFError:
+            break
+        if choice.lower() == 'q':
+            break
+
+        edit_match = re.match(r'^e(\d+)$', choice.lower())
+        if edit_match:
+            idx = int(edit_match.group(1)) - 1
+            if 0 <= idx < len(tweets):
+                tweets[idx] = edit_tweet(tweets[idx])
+                print(format_tweet_display(tweets[idx], idx + 1) + " (編集済み)")
+            continue
+
+        try:
+            idx = int(choice) - 1
+        except ValueError:
+            continue
+        if 0 <= idx < len(tweets):
+            if clipboard:
+                if copy_to_clipboard(tweets[idx]):
+                    print("クリップボードにコピーしました。")
+            else:
+                run_twitter(config, "post", tweets[idx])
+                save_post(tweets[idx])
+            break
+
+
+def cmd_trending(args, config):
+    """検索キーワードの最新ツイートからトレンドをAI分析する"""
+    query = args.query
+    ai_cli = args.ai
+    max_tweets = getattr(args, 'max', 30) or 30
+
+    print(f"\"{query}\" の最新ツイートを取得中 (最大 {max_tweets} 件)...")
+    output = run_twitter_capture(
+        config, "search", query, "-t", "Latest", "--max", str(max_tweets), "--json"
+    )
+
+    if not output:
+        print("Error: 検索結果の取得に失敗しました。")
+        sys.exit(1)
+
+    try:
+        results = json.loads(output)
+    except json.JSONDecodeError:
+        results = None
+
+    if results and isinstance(results, list):
+        tweet_texts = []
+        for item in results:
+            user = item.get("user", {}).get("screen_name", "?")
+            text = item.get("text", "")
+            if text:
+                tweet_texts.append(f"@{user}: {text}")
+        search_text = "\n---\n".join(tweet_texts)
+    else:
+        search_text = output[:5000]
+
+    prompt = (
+        f"以下は「{query}」で検索した最新のツイートです。\n"
+        "このトピックのトレンドを分析してください：\n\n"
+        "1. **現在の主要な話題**（3-5個、箇条書き）\n"
+        "2. **意見の分布**（賛成/反対/中立の傾向）\n"
+        "3. **注目すべき視点やユニークな意見**\n"
+        "4. **今このトピックでツイートするなら**（3つの角度を提案）\n\n"
+        f"ツイート:\n{search_text[:4000]}"
+    )
+
+    print(f"AI でトレンド分析中 ({ai_cli})...")
+    content = run_ai_cli(ai_cli, prompt)
+    print(f"\n--- Trend Analysis: \"{query}\" ---\n{content.strip()}")
+
+
+def cmd_chain(args, config):
+    """generate → improve → schedule/post を一気通貫で実行するワークフロー"""
+    ai_cli = args.ai
+    tone = getattr(args, 'tone', None)
+    schedule_at = getattr(args, 'at', None)
+    dry_run = getattr(args, 'dry_run', False)
+
+    # Step 1: テーマまたはURLからツイート生成
+    post_data = resolve_post_data(args, config)
+    if post_data is None:
+        return
+
+    label = post_data.get("topic") or post_data.get("title") or post_data.get("url") or "Free-form"
+    print(f"\n=== Step 1: 生成 ({label}) ===")
+    tweets = generate_tweets_with_cli(post_data, config, ai_cli=ai_cli, tone=tone)
+
+    if not tweets:
+        print("Error: AI がツイートを生成できませんでした。")
+        sys.exit(1)
+
+    for i, t in enumerate(tweets, 1):
+        print(format_tweet_display(t, i))
+
+    # Step 2: ベスト案を選択
+    try:
+        choice = input(f"\nベスト案を選択 (1-{len(tweets)}), 'q' で中止: ").strip()
+    except EOFError:
+        return
+    if choice.lower() == 'q':
+        return
+    try:
+        idx = int(choice) - 1
+    except ValueError:
+        print("無効な入力です。")
+        return
+    if not (0 <= idx < len(tweets)):
+        print("範囲外です。")
+        return
+
+    selected = tweets[idx]
+
+    # Step 3: AI で改善
+    print(f"\n=== Step 2: AI で改善中 ===")
+    improve_prompt = (
+        "以下の文章をX（Twitter）投稿としてさらに改善してください。\n"
+        "改善版を3つ作ってください。よりキャッチーに、自然に。\n"
+        "出力はツイート内容のみを1行ずつ出力してください。\n"
+        f"280文字以内に収めてください。\n\n元の文章: {selected}"
+    )
+    if tone and tone in TONE_PRESETS:
+        improve_prompt = f"【トーン指定】{TONE_PRESETS[tone]}\n\n{improve_prompt}"
+
+    content = run_ai_cli(ai_cli, improve_prompt)
+    improved = parse_ai_tweets(content, max_count=3)
+
+    if not improved:
+        print("改善案を生成できませんでした。元のツイートを使用します。")
+        final = selected
+    else:
+        print(f"\n--- Original ---\n{selected}")
+        print(f"\n--- Improved ---")
+        for i, t in enumerate(improved, 1):
+            print(format_tweet_display(t, i))
+
+        try:
+            choice2 = input(f"\n改善版を選択 (1-{len(improved)}), '0' で元のまま, 'q' で中止: ").strip()
+        except EOFError:
+            return
+        if choice2.lower() == 'q':
+            return
+        if choice2 == '0':
+            final = selected
+        else:
+            try:
+                idx2 = int(choice2) - 1
+            except ValueError:
+                final = selected
+            else:
+                final = improved[idx2] if 0 <= idx2 < len(improved) else selected
+
+    # Step 4: スケジュールまたは投稿
+    if schedule_at:
+        print(f"\n=== Step 3: スケジュール ===")
+        try:
+            dt = datetime.fromisoformat(schedule_at)
+        except ValueError:
+            print(f"Error: 日時フォーマットが不正です: {schedule_at}")
+            return
+        if dry_run:
+            print(f"[dry-run] {dt.strftime('%Y-%m-%d %H:%M')} に予約: {final[:80]}...")
+            return
+        db = init_queue_db()
+        db.execute(
+            f"INSERT INTO {QUEUE_TABLE} (tweet_text, scheduled_at, created_at) VALUES (?, ?, ?)",
+            (final, dt.isoformat(), datetime.now().isoformat())
+        )
+        db.commit()
+        db.close()
+        print(f"予約しました: {dt.strftime('%Y-%m-%d %H:%M')} → {final[:60]}...")
+    else:
+        print(f"\n=== Step 3: 投稿 ===")
+        print(f"最終テキスト ({len(final)}文字):\n  {final}")
+        if dry_run:
+            print("\n[dry-run] プレビューのみ。")
+            return
+        try:
+            confirm = input("\n投稿しますか？ (y/N): ").strip().lower()
+        except EOFError:
+            return
+        if confirm != 'y':
+            print("キャンセルしました。")
+            return
+        article_url = post_data.get("url") or None
+        run_twitter(config, "post", final)
+        save_post(final, article_url=article_url, tone=tone)
+        print("投稿完了！")
+
+
 # --- Read Operations ---
 
-def cmd_feed(args, config):
+def _build_twitter_args(args, command, positional=None):
+    """Read系コマンドの共通引数を組み立てるヘルパー"""
     extra = []
     if getattr(args, 'compact', False):
-        extra = ["-c"]
-    extra.append("feed")
+        extra.append("-c")
+    extra.append(command)
+    if positional:
+        extra += positional
     if getattr(args, 'type', None):
         extra += ["-t", args.type]
     if getattr(args, 'max', None):
@@ -1298,134 +1706,55 @@ def cmd_feed(args, config):
         extra += ["--json"]
     if getattr(args, 'output', None):
         extra += ["-o", args.output]
-    run_twitter(config, *extra)
+    return extra
+
+
+def cmd_feed(args, config):
+    run_twitter(config, *_build_twitter_args(args, "feed"))
 
 
 def cmd_bookmarks(args, config):
-    extra = []
-    if getattr(args, 'compact', False):
-        extra = ["-c"]
-    extra.append("bookmarks")
-    if getattr(args, 'max', None):
-        extra += ["--max", str(args.max)]
-    if getattr(args, 'yaml', False):
-        extra += ["--yaml"]
-    if getattr(args, 'json', False):
-        extra += ["--json"]
-    if getattr(args, 'output', None):
-        extra += ["-o", args.output]
-    run_twitter(config, *extra)
+    run_twitter(config, *_build_twitter_args(args, "bookmarks"))
 
 
 def cmd_search(args, config):
-    extra = []
-    if getattr(args, 'compact', False):
-        extra = ["-c"]
-    extra.append("search")
-    extra.append(args.query)
-    if getattr(args, 'type', None):
-        extra += ["-t", args.type]
-    if getattr(args, 'max', None):
-        extra += ["--max", str(args.max)]
-    if getattr(args, 'yaml', False):
-        extra += ["--yaml"]
-    if getattr(args, 'json', False):
-        extra += ["--json"]
-    if getattr(args, 'output', None):
-        extra += ["-o", args.output]
-    run_twitter(config, *extra)
+    run_twitter(config, *_build_twitter_args(args, "search", [args.query]))
 
 
 def cmd_tweet(args, config):
-    extra = ["tweet", args.id_or_url]
-    if getattr(args, 'yaml', False):
-        extra += ["--yaml"]
-    if getattr(args, 'json', False):
-        extra += ["--json"]
-    run_twitter(config, *extra)
+    run_twitter(config, *_build_twitter_args(args, "tweet", [args.id_or_url]))
 
 
 def cmd_list(args, config):
-    extra = ["list", args.list_id]
-    if getattr(args, 'max', None):
-        extra += ["--max", str(args.max)]
-    if getattr(args, 'yaml', False):
-        extra += ["--yaml"]
-    if getattr(args, 'json', False):
-        extra += ["--json"]
-    run_twitter(config, *extra)
+    run_twitter(config, *_build_twitter_args(args, "list", [args.list_id]))
 
 
 def cmd_user_posts(args, config):
-    extra = []
-    if getattr(args, 'compact', False):
-        extra = ["-c"]
-    extra += ["user-posts", args.username]
-    if getattr(args, 'max', None):
-        extra += ["--max", str(args.max)]
-    if getattr(args, 'yaml', False):
-        extra += ["--yaml"]
-    if getattr(args, 'json', False):
-        extra += ["--json"]
-    run_twitter(config, *extra)
+    run_twitter(config, *_build_twitter_args(args, "user-posts", [args.username]))
 
 
 def cmd_likes(args, config):
-    extra = ["likes", args.username]
-    if getattr(args, 'max', None):
-        extra += ["--max", str(args.max)]
-    if getattr(args, 'yaml', False):
-        extra += ["--yaml"]
-    if getattr(args, 'json', False):
-        extra += ["--json"]
-    run_twitter(config, *extra)
+    run_twitter(config, *_build_twitter_args(args, "likes", [args.username]))
 
 
 def cmd_followers(args, config):
-    extra = ["followers", args.username]
-    if getattr(args, 'max', None):
-        extra += ["--max", str(args.max)]
-    if getattr(args, 'yaml', False):
-        extra += ["--yaml"]
-    if getattr(args, 'json', False):
-        extra += ["--json"]
-    run_twitter(config, *extra)
+    run_twitter(config, *_build_twitter_args(args, "followers", [args.username]))
 
 
 def cmd_following(args, config):
-    extra = ["following", args.username]
-    if getattr(args, 'max', None):
-        extra += ["--max", str(args.max)]
-    if getattr(args, 'yaml', False):
-        extra += ["--yaml"]
-    if getattr(args, 'json', False):
-        extra += ["--json"]
-    run_twitter(config, *extra)
+    run_twitter(config, *_build_twitter_args(args, "following", [args.username]))
 
 
 def cmd_whoami(args, config):
-    extra = ["whoami"]
-    if getattr(args, 'yaml', False):
-        extra += ["--yaml"]
-    if getattr(args, 'json', False):
-        extra += ["--json"]
-    run_twitter(config, *extra)
+    run_twitter(config, *_build_twitter_args(args, "whoami"))
 
 
 def cmd_status(args, config):
-    extra = ["status"]
-    if getattr(args, 'yaml', False):
-        extra += ["--yaml"]
-    run_twitter(config, *extra)
+    run_twitter(config, *_build_twitter_args(args, "status"))
 
 
 def cmd_user(args, config):
-    extra = ["user", args.username]
-    if getattr(args, 'yaml', False):
-        extra += ["--yaml"]
-    if getattr(args, 'json', False):
-        extra += ["--json"]
-    run_twitter(config, *extra)
+    run_twitter(config, *_build_twitter_args(args, "user", [args.username]))
 
 
 # --- Write Operations ---
@@ -1528,6 +1857,17 @@ def main():
     digest           タイムラインをAIで要約
     engage           キーワードにマッチするツイートに自動いいね
     recycle          過去の投稿をAIでリフレーズして再投稿
+    analyze          ユーザーの投稿傾向をAI分析
+    translate        ツイートを翻訳してクロスポスト
+    trending         キーワードのトレンドをAI分析
+    chain            生成→改善→投稿の一気通貫ワークフロー
+
+  [下書き]
+    draft-save       下書きをローカルに保存
+    draft-list       下書き一覧を表示
+    draft-edit       下書きを編集
+    draft-post       下書きを投稿
+    draft-delete     下書きを削除
 
   [スケジュール]
     schedule-add     ツイートを予約キューに追加
@@ -1671,6 +2011,67 @@ def main():
     p = subparsers.add_parser("schedule-remove", help="予約キューからツイートを削除")
     p.add_argument("id", type=int, help="削除するキューID")
     p.set_defaults(func=cmd_schedule_remove)
+
+    # draft-save
+    p = subparsers.add_parser("draft-save", help="下書きをローカルに保存")
+    p.add_argument("text", help="下書きテキスト")
+    p.add_argument("--tone", choices=list(TONE_PRESETS.keys()), help="トーンタグ")
+    p.set_defaults(func=cmd_draft_save)
+
+    # draft-list
+    p = subparsers.add_parser("draft-list", help="下書き一覧を表示")
+    p.set_defaults(func=cmd_draft_list)
+
+    # draft-edit
+    p = subparsers.add_parser("draft-edit", help="下書きを編集")
+    p.add_argument("id", type=int, help="下書きID")
+    p.set_defaults(func=cmd_draft_edit)
+
+    # draft-post
+    p = subparsers.add_parser("draft-post", help="下書きを投稿")
+    p.add_argument("id", type=int, help="下書きID")
+    p.add_argument("--dry-run", action="store_true", help="投稿せずプレビューのみ")
+    p.set_defaults(func=cmd_draft_post)
+
+    # draft-delete
+    p = subparsers.add_parser("draft-delete", help="下書きを削除")
+    p.add_argument("id", type=int, help="下書きID")
+    p.set_defaults(func=cmd_draft_delete)
+
+    # analyze
+    p = subparsers.add_parser("analyze", help="ユーザーの投稿傾向をAI分析")
+    add_username_arg(p)
+    p.add_argument("--ai", choices=["gemini", "codex", "claude"], default="gemini", help="使用するAI CLI")
+    add_max_flag(p)
+    p.set_defaults(func=cmd_analyze)
+
+    # translate
+    p = subparsers.add_parser("translate", help="ツイートを翻訳してクロスポスト")
+    p.add_argument("text", help="翻訳するテキスト")
+    p.add_argument("--lang", default="en", help="翻訳先言語コード (デフォルト: en)")
+    p.add_argument("--ai", choices=["gemini", "codex", "claude"], default="gemini", help="使用するAI CLI")
+    p.add_argument("--dry-run", action="store_true", help="投稿せずプレビューのみ")
+    p.add_argument("--clipboard", action="store_true", help="投稿せずクリップボードにコピー")
+    p.set_defaults(func=cmd_translate)
+
+    # trending
+    p = subparsers.add_parser("trending", help="キーワードのトレンドをAI分析")
+    p.add_argument("query", help="検索キーワード")
+    p.add_argument("--ai", choices=["gemini", "codex", "claude"], default="gemini", help="使用するAI CLI")
+    add_max_flag(p)
+    p.set_defaults(func=cmd_trending)
+
+    # chain
+    p = subparsers.add_parser("chain", help="生成→改善→投稿/スケジュールの一気通貫ワークフロー")
+    p.add_argument("input", nargs="?", help="記事URL、slug、またはフリーテーマ")
+    p.add_argument("--topic", metavar="THEME", help="自由なテーマからツイート生成")
+    p.add_argument("--ai", choices=["gemini", "codex", "claude"], default="gemini", help="使用するAI CLI")
+    p.add_argument("--tone", choices=list(TONE_PRESETS.keys()), help="ツイートのトーン")
+    p.add_argument("--at", metavar="DATETIME", help="スケジュール日時 (例: 2026-04-06T18:00)")
+    p.add_argument("--dry-run", action="store_true", help="投稿せずプレビューのみ")
+    p.add_argument("--auto", action="store_true", help="自動選択")
+    p.add_argument("--force", action="store_true", help="重複チェックスキップ")
+    p.set_defaults(func=cmd_chain)
 
     # feed
     p = subparsers.add_parser("feed", help="タイムライン表示")
@@ -1828,7 +2229,12 @@ def main():
         return
 
     # config 不要なコマンド（SQLiteのみで完結）
-    if args.command in ("history", "history-clear", "stats", "schedule-add", "schedule-list", "schedule-remove"):
+    config_free = (
+        "history", "history-clear", "stats",
+        "schedule-add", "schedule-list", "schedule-remove",
+        "draft-save", "draft-list", "draft-edit", "draft-delete",
+    )
+    if args.command in config_free:
         if not hasattr(args, 'func'):
             parser.print_help()
             return
