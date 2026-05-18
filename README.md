@@ -8,6 +8,27 @@ Generate tweet drafts using Gemini, Claude, or Codex CLI, then post them interac
 
 > Built for developers who write blogs and want a CLI-first workflow for sharing content on X (Twitter).
 
+> **Warning — read this first.** This tool reads from and posts to X (Twitter) through **unofficial, browser-cookie-based automation** ([twitter-cli](https://github.com/jackwener/twitter-cli)) — **not** the official X API. This may violate X's Terms of Service and can get your account **rate-limited, suspended, or permanently banned**. It is provided as-is for educational and personal use, with no warranty. Read the [Disclaimer](#disclaimer) before using it.
+
+---
+
+## Disclaimer
+
+This project does **not** use the official X API. It wraps [twitter-cli](https://github.com/jackwener/twitter-cli), which authenticates with **browser session cookies** (`auth_token`, `ct0`) and accesses X (Twitter) the way a logged-in browser would.
+
+**Terms of Service.** Accessing X by automated means outside the official API — automated reading, scraping, and automated posting — may breach the [X Terms of Service](https://x.com/en/tos), the [X Developer Agreement and Policy](https://developer.x.com/en/developer-terms/agreement-and-policy), and the [X Automation Rules](https://help.x.com/en/rules-and-policies/x-automation).
+
+**Account risk.** Automated and bulk activity — `--auto`, `generate-batch`, `engage` (auto-like), `recycle`, and cron-scheduled posting — is exactly the behavior X's anti-spam and automation rules restrict. Using these features can get your account **rate-limited, suspended, or permanently banned**, and X may act without warning. The unofficial cookie-based mechanism can also stop working at any time if X changes its internals.
+
+**Your responsibility.**
+
+- Use this tool **only on an account you personally own**. Never use it on accounts you do not control.
+- **You are responsible for everything posted**, including AI-generated text. Review drafts before posting, and be especially careful with fully automatic modes (`--auto`, `chain`, cron).
+- Do not use it for spam, mass following, mass engagement, or anything else prohibited by X.
+- When generating tweets from an article, respect the source's copyright — summarize and credit the source rather than copying text verbatim.
+
+**No warranty.** This software is provided "as is", without warranty of any kind. The author accepts **no liability** for account suspension, data loss, or any other damage arising from its use. **Use it at your own risk.** If you need a fully compliant solution, use the [official X API](https://developer.x.com/en/docs/x-api) instead.
+
 ---
 
 ## Why this project exists
